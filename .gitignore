@@ -1,0 +1,84 @@
+# ─── Python ───────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Poetry — manter lock, ignorar virtualenvs locais
+.poetry/
+
+# ─── Node / Frontend ──────────────────────────────────────
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+*.local
+.vite/
+coverage/
+
+# ─── Variáveis de ambiente / segredos ─────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*
+*secret*
+!*secret*.example
+
+# ─── Terraform / Infra ────────────────────────────────────
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# ─── Docker ───────────────────────────────────────────────
+*.env.docker
+
+# ─── IDE / SO ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs / temporários ───────────────────────────────────
+*.log
+logs/
+tmp/
+*.tmp
+
+# ─── Documentos INTERNOS — NUNCA versionar (estratégia/memória/instruções) ──
+# Regra do dono: arquivos de melhorias e instruções não sobem para o repo público.
+MEMORIA-PROJETO.md
+Projeto ERP.md
+/progress/
+/docs/analise_estrategica_competitiva_2026.md
+/docs/blueprint_architecture.md
+/docs/product_thesis_and_scope.md
+/docs/scaling_and_expansion_plan.md
+/docs/cutover_rehearsal_plan.md
+/docs/security_and_lgpd_plan.md
+/docs/security_and_load_testing_report.md
+/docs/adr/
+/docs/runbooks/
