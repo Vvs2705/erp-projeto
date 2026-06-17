@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +21,7 @@ from starlette.responses import Response
 
 from app.core.config import settings
 from app.core.database import engine, tenant_context
+from app.core.observability import init_observability, new_request_id
 from app.core.security import principal_from_token
 from app.core.tokens import TokenError
 from app.routers.auth import router as auth_router
@@ -37,6 +39,10 @@ app = FastAPI(
     version="0.2.0",
 )
 
+init_observability(app)
+
+_log = structlog.get_logger(__name__)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
@@ -51,6 +57,24 @@ def _is_public(path: str) -> bool:
     if path == "/openapi.json" or path.startswith(("/docs", "/redoc")):
         return not settings.is_production
     return any(path.startswith(prefix) for prefix in settings.public_path_prefixes)
+
+
+@app.middleware("http")
+async def logging_middleware(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
+    """Injeta request_id no contexto structlog de cada request."""
+    request_id = new_request_id()
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    response = await call_next(request)
+    _log.info(
+        "http_request",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+    )
+    return response
 
 
 @app.middleware("http")
@@ -80,6 +104,7 @@ async def auth_middleware(
 
     request.state.principal = principal
     ctx_token = tenant_context.set(principal.tenant_id)
+    structlog.contextvars.bind_contextvars(tenant_id=str(principal.tenant_id))
     try:
         return await call_next(request)
     finally:

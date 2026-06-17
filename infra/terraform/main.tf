@@ -16,6 +16,7 @@ terraform {
     }
   }
 
+  # Mover para backend remoto (S3/GCS) ao atingir staging/prod.
   backend "local" {
     path = "terraform.tfstate"
   }
@@ -34,37 +35,43 @@ provider "fly" {
   use_token = true
 }
 
-# --- SUPABASE RESOURCES ---
-# Initial declaration for a Supabase Project
-resource "supabase_project" "db_project" {
+# ── SUPABASE (banco) ──────────────────────────────────────────────────────────
+# Região: sa-east-1 → São Paulo; dados nunca saem do Brasil (LGPD).
+resource "supabase_project" "db" {
   organization_id   = var.supabase_organization_id
-  name              = "${var.project_name}-database-${var.environment}"
-  database_password = "ReplaceWithAStrongSecurePasswordOrVariable123!"
-  region            = "us-east-1"
+  name              = "${var.project_name}-db-${var.environment}"
+  database_password = var.supabase_db_password
+  region            = "sa-east-1"
 }
 
-# --- VERCEL RESOURCES ---
-# Initial declaration for the Frontend Project on Vercel
-resource "vercel_project" "frontend_project" {
-  name      = "${var.project_name}-frontend-${var.environment}"
-  framework = "nextjs"
+# ── FLY.IO (backend) ─────────────────────────────────────────────────────────
+resource "fly_app" "backend" {
+  name = "${var.project_name}-api-${var.environment}"
+  org  = var.fly_org
+}
+
+# ── VERCEL (frontend) ────────────────────────────────────────────────────────
+resource "vercel_project" "frontend" {
+  name      = "${var.project_name}-web-${var.environment}"
+  framework = "vite"
   git_repository = {
     type = "github"
-    repo = "viniciussouza/${var.project_name}"
+    repo = var.github_repo
   }
 }
 
-# Example deployment environment variables on Vercel
-resource "vercel_project_environment_variable" "backend_url" {
-  project_id = vercel_project.frontend_project.id
-  key        = "NEXT_PUBLIC_API_URL"
-  value      = "https://${var.project_name}-backend.fly.dev"
+resource "vercel_project_environment_variable" "api_url" {
+  project_id = vercel_project.frontend.id
+  key        = "VITE_API_URL"
+  value      = "https://${fly_app.backend.name}.fly.dev"
   target     = ["production", "preview"]
 }
 
-# --- FLY.IO RESOURCES ---
-# Initial declaration for Backend App on Fly.io
-resource "fly_app" "backend_app" {
-  name = "${var.project_name}-backend-${var.environment}"
-  org  = "personal"
+# ── UPSTASH REDIS (cache / rate-limit / locks) ────────────────────────────────
+# Upstash não tem provider Terraform oficial maduro; criamos via data source
+# ou output de referência para configuração manual na primeira execução.
+# Substitua por um resource real quando o provider upstash/upstash estiver
+# disponível e estável.
+output "upstash_setup_note" {
+  value = "Crie um banco Redis Upstash na região sa-east-1 manualmente e injete REDIS_URL via secrets do Fly.io: fly secrets set REDIS_URL=rediss://..."
 }

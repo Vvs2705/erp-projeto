@@ -483,3 +483,252 @@ class ReportingService:
             },
             "details": details,
         }
+
+    @staticmethod
+    async def get_balance_sheet(
+        db: AsyncSession, tenant_id: uuid.UUID, as_of_date: date
+    ) -> dict[str, Any]:
+        """Balanço Patrimonial na data especificada.
+
+        Calcula o saldo acumulado de cada conta de Ativo, Passivo e Patrimônio
+        Líquido até ``as_of_date`` (inclusive), usando apenas lançamentos postados.
+        Valida a equação patrimonial: Ativo = Passivo + PL.
+        """
+        stmt = (
+            select(
+                Account.id,
+                Account.code,
+                Account.name,
+                Account.type,
+                Account.nature,
+                Account.parent_id,
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (JournalLine.direction == "DEBIT", JournalLine.amount),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("total_debit"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (JournalLine.direction == "CREDIT", JournalLine.amount),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("total_credit"),
+            )
+            .select_from(Account)
+            .outerjoin(
+                JournalLine,
+                (Account.id == JournalLine.account_id)
+                & (JournalLine.tenant_id == tenant_id),
+            )
+            .outerjoin(
+                JournalEntry,
+                (JournalLine.journal_entry_id == JournalEntry.id)
+                & (JournalEntry.status == "posted")
+                & (JournalEntry.tenant_id == tenant_id)
+                & (JournalEntry.entry_date <= as_of_date),
+            )
+            .where(
+                Account.tenant_id == tenant_id,
+                Account.type.in_(["asset", "liability", "equity"]),
+            )
+            .group_by(
+                Account.id,
+                Account.code,
+                Account.name,
+                Account.type,
+                Account.nature,
+                Account.parent_id,
+            )
+            .order_by(Account.code)
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        assets: list[dict[str, Any]] = []
+        liabilities: list[dict[str, Any]] = []
+        equity: list[dict[str, Any]] = []
+        total_assets = Decimal("0.0000")
+        total_liabilities = Decimal("0.0000")
+        total_equity = Decimal("0.0000")
+
+        for row in rows:
+            debit = Decimal(str(row.total_debit))
+            credit = Decimal(str(row.total_credit))
+            balance = (debit - credit) if row.nature == "debit" else (credit - debit)
+
+            entry: dict[str, Any] = {
+                "account_id": row.id,
+                "code": row.code,
+                "name": row.name,
+                "type": row.type,
+                "parent_id": row.parent_id,
+                "balance": balance,
+            }
+
+            if row.type == "asset":
+                assets.append(entry)
+                total_assets += balance
+            elif row.type == "liability":
+                liabilities.append(entry)
+                total_liabilities += balance
+            else:
+                equity.append(entry)
+                total_equity += balance
+
+        is_balanced = abs(total_assets - (total_liabilities + total_equity)) < Decimal(
+            "0.01"
+        )
+
+        return {
+            "as_of_date": as_of_date,
+            "assets": assets,
+            "liabilities": liabilities,
+            "equity": equity,
+            "totals": {
+                "total_assets": total_assets,
+                "total_liabilities": total_liabilities,
+                "total_equity": total_equity,
+                "is_balanced": is_balanced,
+            },
+        }
+
+    @staticmethod
+    async def get_ledger(
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        account_id: uuid.UUID,
+        start_date: date,
+        end_date: date,
+    ) -> dict[str, Any]:
+        """Razão analítico de uma conta no período.
+
+        Retorna todos os lançamentos postados de uma conta em ordem cronológica,
+        com saldo progressivo (running balance).
+        """
+        # Busca a conta
+        acc_stmt = select(Account).where(
+            Account.tenant_id == tenant_id, Account.id == account_id
+        )
+        acc_result = await db.execute(acc_stmt)
+        account = acc_result.scalar_one_or_none()
+        if account is None:
+            raise ValueError(f"Conta {account_id} não encontrada.")
+
+        # Saldo anterior ao período
+        prev_stmt = (
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (JournalLine.direction == "DEBIT", JournalLine.amount),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("prev_debit"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (JournalLine.direction == "CREDIT", JournalLine.amount),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("prev_credit"),
+            )
+            .select_from(JournalLine)
+            .join(
+                JournalEntry,
+                (JournalLine.journal_entry_id == JournalEntry.id)
+                & (JournalEntry.status == "posted")
+                & (JournalEntry.tenant_id == tenant_id)
+                & (JournalEntry.entry_date < start_date),
+            )
+            .where(
+                JournalLine.account_id == account_id,
+                JournalLine.tenant_id == tenant_id,
+            )
+        )
+        prev_result = await db.execute(prev_stmt)
+        prev_row = prev_result.one()
+        prev_debit = Decimal(str(prev_row.prev_debit))
+        prev_credit = Decimal(str(prev_row.prev_credit))
+
+        if account.nature == "debit":
+            opening_balance = prev_debit - prev_credit
+        else:
+            opening_balance = prev_credit - prev_debit
+
+        # Lançamentos do período
+        period_stmt = (
+            select(
+                JournalEntry.id.label("entry_id"),
+                JournalEntry.entry_date,
+                JournalEntry.description.label("entry_description"),
+                JournalLine.id.label("line_id"),
+                JournalLine.direction,
+                JournalLine.amount,
+                JournalLine.description.label("line_description"),
+            )
+            .select_from(JournalLine)
+            .join(
+                JournalEntry,
+                (JournalLine.journal_entry_id == JournalEntry.id)
+                & (JournalEntry.status == "posted")
+                & (JournalEntry.tenant_id == tenant_id)
+                & (JournalEntry.entry_date >= start_date)
+                & (JournalEntry.entry_date <= end_date),
+            )
+            .where(
+                JournalLine.account_id == account_id,
+                JournalLine.tenant_id == tenant_id,
+            )
+            .order_by(JournalEntry.entry_date, JournalEntry.id, JournalLine.id)
+        )
+        period_result = await db.execute(period_stmt)
+        period_rows = period_result.all()
+
+        running_balance = opening_balance
+        lines: list[dict[str, Any]] = []
+        for row in period_rows:
+            amount = Decimal(str(row.amount))
+            if account.nature == "debit":
+                if row.direction == "DEBIT":
+                    running_balance += amount
+                else:
+                    running_balance -= amount
+            else:
+                if row.direction == "CREDIT":
+                    running_balance += amount
+                else:
+                    running_balance -= amount
+
+            lines.append(
+                {
+                    "entry_id": row.entry_id,
+                    "entry_date": row.entry_date,
+                    "description": row.line_description or row.entry_description,
+                    "direction": row.direction,
+                    "amount": amount,
+                    "running_balance": running_balance,
+                }
+            )
+
+        return {
+            "account_id": account_id,
+            "account_code": account.code,
+            "account_name": account.name,
+            "start_date": start_date,
+            "end_date": end_date,
+            "opening_balance": opening_balance,
+            "closing_balance": running_balance,
+            "lines": lines,
+        }

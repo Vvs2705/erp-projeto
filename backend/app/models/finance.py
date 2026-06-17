@@ -26,6 +26,10 @@ class Account(Base):
             "type IN ('asset', 'liability', 'equity', 'revenue', 'expense')",
             name="chk_accounts_type",
         ),
+        CheckConstraint(
+            "nature IN ('debit', 'credit')",
+            name="chk_accounts_nature",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -37,6 +41,10 @@ class Account(Base):
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Saldo normal: 'debit' para ativo/despesa; 'credit' para passivo/PL/receita
+    nature: Mapped[str] = mapped_column(String(6), nullable=False, default="debit")
+    # False = grupo (apenas agrupa filhos); True = analítica (aceita lançamentos)
+    allow_posting: Mapped[bool] = mapped_column(default=True, nullable=False)
     parent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("accounts.id", ondelete="RESTRICT"),
@@ -365,6 +373,42 @@ class InvoicePayment(Base):
     # Relationships
     invoice: Mapped["Invoice"] = relationship(back_populates="payments")
     journal_entry: Mapped[Optional["JournalEntry"]] = relationship()
+
+
+class PeriodClosing(Base):
+    """Registra o fechamento contábil de um período fiscal.
+
+    O fechamento gera um lançamento de apuração de resultado que transfere o
+    saldo de receitas e despesas para a conta de lucros/prejuízos acumulados.
+    """
+
+    __tablename__ = "period_closings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    fiscal_period_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("fiscal_periods.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    closing_entry_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("journal_entries.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    net_result: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, nullable=False
+    )
+    closed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # Relationships
+    fiscal_period: Mapped["FiscalPeriod"] = relationship()
+    closing_entry: Mapped["JournalEntry"] = relationship()
 
 
 class Partner(Base):

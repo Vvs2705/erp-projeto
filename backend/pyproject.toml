@@ -19,6 +19,14 @@ redis = "^5.1.1"
 "fiscal-engine" = { path = "../fiscal-engine", develop = true }
 pyjwt = "^2.9.0"
 argon2-cffi = "^23.1.0"
+# A3 — Observabilidade
+opentelemetry-api = ">=1.24.0,<2.0.0"
+opentelemetry-sdk = ">=1.24.0,<2.0.0"
+opentelemetry-instrumentation-fastapi = {version = ">=0.45b0", allow-prereleases = true}
+opentelemetry-instrumentation-sqlalchemy = {version = ">=0.45b0", allow-prereleases = true}
+opentelemetry-exporter-otlp-proto-http = ">=1.24.0,<2.0.0"
+sentry-sdk = {extras = ["fastapi"], version = ">=2.0.0,<3.0.0"}
+structlog = ">=24.0.0,<26.0.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.9"
