@@ -8,6 +8,7 @@ from sqlalchemy import event, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import selectinload
 
 from app.core.database import Base
 from app.models.finance import (
@@ -312,7 +313,11 @@ async def test_purchase_order_receipt_posting_rules(
     # Assert JournalEntry provision was created and posted:
     # Debit: Estoque (600.00)
     # Credit: Fornecedores a Pagar (600.00)
-    stmt = select(JournalEntry).where(JournalEntry.tenant_id == tenant.id)
+    stmt = (
+        select(JournalEntry)
+        .where(JournalEntry.tenant_id == tenant.id)
+        .options(selectinload(JournalEntry.lines))
+    )
     res = await db_session.execute(stmt)
     entries = res.scalars().all()
     assert len(entries) == 1
@@ -412,6 +417,7 @@ async def test_sales_order_dispatch_posting_rules(
         select(JournalEntry)
         .where(JournalEntry.tenant_id == tenant.id)
         .order_by(JournalEntry.created_at.asc())
+        .options(selectinload(JournalEntry.lines))
     )
     res = await db_session.execute(stmt)
     entries = res.scalars().all()
