@@ -1,25 +1,30 @@
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional, Dict
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.purchase import PurchaseRequisition, PurchaseOrder, PurchaseOrderItem
-from app.models.finance import Bill, Journal, Account
+from app.models.finance import Account, Bill, Journal
+from app.models.purchase import PurchaseOrder, PurchaseOrderItem, PurchaseRequisition
 from app.models.tenant import LegalEntity
-from app.services.inventory_service import InventoryService
 from app.services.finance_service import FinanceService
+from app.services.inventory_service import InventoryService
+
 
 class PurchaseException(Exception):
     """Base exception for purchase service"""
+
     pass
+
 
 class PurchaseOrderNotFoundException(PurchaseException):
     pass
 
+
 class PurchaseOrderItemNotFoundException(PurchaseException):
     pass
+
 
 class PurchaseService:
     @staticmethod
@@ -27,9 +32,7 @@ class PurchaseService:
         db: AsyncSession, tenant_id: uuid.UUID, description: str
     ) -> PurchaseRequisition:
         req = PurchaseRequisition(
-            tenant_id=tenant_id,
-            description=description,
-            status="draft"
+            tenant_id=tenant_id, description=description, status="draft"
         )
         db.add(req)
         await db.flush()
@@ -41,7 +44,7 @@ class PurchaseService:
     ) -> PurchaseRequisition:
         stmt = select(PurchaseRequisition).where(
             PurchaseRequisition.tenant_id == tenant_id,
-            PurchaseRequisition.id == requisition_id
+            PurchaseRequisition.id == requisition_id,
         )
         res = await db.execute(stmt)
         req = res.scalar_one_or_none()
@@ -57,7 +60,7 @@ class PurchaseService:
         tenant_id: uuid.UUID,
         provider_name: str,
         cnpj: str,
-        items: list[dict]
+        items: list[dict],
     ) -> PurchaseOrder:
         """
         Creates a Purchase Order with its items.
@@ -76,7 +79,7 @@ class PurchaseService:
                     product_id=uuid.UUID(str(item["product_id"])),
                     quantity=qty,
                     unit_cost=cost,
-                    quantity_received=Decimal("0.0000")
+                    quantity_received=Decimal("0.0000"),
                 )
             )
 
@@ -86,7 +89,7 @@ class PurchaseService:
             cnpj=cnpj,
             status="draft",
             total_amount=total_amount,
-            items=po_items
+            items=po_items,
         )
         db.add(po)
         await db.flush()
@@ -97,13 +100,14 @@ class PurchaseService:
         db: AsyncSession, tenant_id: uuid.UUID, purchase_order_id: uuid.UUID
     ) -> PurchaseOrder:
         stmt = select(PurchaseOrder).where(
-            PurchaseOrder.tenant_id == tenant_id,
-            PurchaseOrder.id == purchase_order_id
+            PurchaseOrder.tenant_id == tenant_id, PurchaseOrder.id == purchase_order_id
         )
         res = await db.execute(stmt)
         po = res.scalar_one_or_none()
         if not po:
-            raise PurchaseOrderNotFoundException(f"Purchase order {purchase_order_id} not found.")
+            raise PurchaseOrderNotFoundException(
+                f"Purchase order {purchase_order_id} not found."
+            )
         po.status = "approved"
         await db.flush()
         return po
@@ -115,11 +119,11 @@ class PurchaseService:
         purchase_order_id: uuid.UUID,
         items_received: dict[uuid.UUID, Decimal],
         invoice_number: str,
-        organization_id: Optional[uuid.UUID] = None,
-        legal_entity_id: Optional[uuid.UUID] = None,
-        journal_id: Optional[uuid.UUID] = None,
-        stock_account_id: Optional[uuid.UUID] = None,
-        ap_account_id: Optional[uuid.UUID] = None
+        organization_id: uuid.UUID | None = None,
+        legal_entity_id: uuid.UUID | None = None,
+        journal_id: uuid.UUID | None = None,
+        stock_account_id: uuid.UUID | None = None,
+        ap_account_id: uuid.UUID | None = None,
     ) -> Bill:
         """
         Processes receipt of PO items:
@@ -130,26 +134,32 @@ class PurchaseService:
         """
         # Fetch the Purchase Order with items
         po_stmt = select(PurchaseOrder).where(
-            PurchaseOrder.tenant_id == tenant_id,
-            PurchaseOrder.id == purchase_order_id
+            PurchaseOrder.tenant_id == tenant_id, PurchaseOrder.id == purchase_order_id
         )
         po_res = await db.execute(po_stmt)
         po = po_res.scalar_one_or_none()
         if not po:
-            raise PurchaseOrderNotFoundException(f"Purchase order {purchase_order_id} not found.")
+            raise PurchaseOrderNotFoundException(
+                f"Purchase order {purchase_order_id} not found."
+            )
 
         if po.status != "approved":
-            raise PurchaseException(f"Purchase order must be approved before receiving. Current status: {po.status}")
+            raise PurchaseException(
+                f"Purchase order must be approved before receiving. Current status: {po.status}"
+            )
 
         # Resolve organization_id if not provided
         if not organization_id:
             # Let's fetch the first organization for this tenant
             from app.models.tenant import Organization
+
             org_stmt = select(Organization).where(Organization.tenant_id == tenant_id)
             org_res = await db.execute(org_stmt)
             org = org_res.scalar()
             if not org:
-                raise PurchaseException("No organization found for tenant. Cannot process receipt.")
+                raise PurchaseException(
+                    "No organization found for tenant. Cannot process receipt."
+                )
             organization_id = org.id
 
         # Resolve legal_entity_id if not provided
@@ -158,7 +168,9 @@ class PurchaseService:
             le_res = await db.execute(le_stmt)
             le = le_res.scalar()
             if not le:
-                raise PurchaseException("No legal entity found for tenant. Cannot process receipt.")
+                raise PurchaseException(
+                    "No legal entity found for tenant. Cannot process receipt."
+                )
             legal_entity_id = le.id
 
         total_received_value = Decimal("0.0000")
@@ -194,11 +206,13 @@ class PurchaseService:
                 move_type="in",
                 quantity=qty_dec,
                 unit_cost=matched_item.unit_cost,
-                reference=f"PO-REC-{invoice_number}"
+                reference=f"PO-REC-{invoice_number}",
             )
 
         if total_received_value <= Decimal("0.0000"):
-            raise PurchaseException("No valid items to receive or received quantities are zero.")
+            raise PurchaseException(
+                "No valid items to receive or received quantities are zero."
+            )
 
         # Update PO status to received if all items fully received
         fully_received = True
@@ -221,21 +235,39 @@ class PurchaseService:
             journal_id = journal.id
 
         if not stock_account_id:
-            sa_stmt = select(Account).where(Account.tenant_id == tenant_id, Account.type == "asset", Account.name.ilike("%estoque%"))
+            sa_stmt = select(Account).where(
+                Account.tenant_id == tenant_id,
+                Account.type == "asset",
+                Account.name.ilike("%estoque%"),
+            )
             sa_res = await db.execute(sa_stmt)
             sa = sa_res.scalar()
             if not sa:
-                sa = Account(tenant_id=tenant_id, code="1.1.03.001", name="Estoque de Mercadorias", type="asset")
+                sa = Account(
+                    tenant_id=tenant_id,
+                    code="1.1.03.001",
+                    name="Estoque de Mercadorias",
+                    type="asset",
+                )
                 db.add(sa)
                 await db.flush()
             stock_account_id = sa.id
 
         if not ap_account_id:
-            ap_stmt = select(Account).where(Account.tenant_id == tenant_id, Account.type == "liability", Account.name.ilike("%fornecedores%"))
+            ap_stmt = select(Account).where(
+                Account.tenant_id == tenant_id,
+                Account.type == "liability",
+                Account.name.ilike("%fornecedores%"),
+            )
             ap_res = await db.execute(ap_stmt)
             ap = ap_res.scalar()
             if not ap:
-                ap = Account(tenant_id=tenant_id, code="2.1.01.001", name="Fornecedores a Pagar", type="liability")
+                ap = Account(
+                    tenant_id=tenant_id,
+                    code="2.1.01.001",
+                    name="Fornecedores a Pagar",
+                    type="liability",
+                )
                 db.add(ap)
                 await db.flush()
             ap_account_id = ap.id
@@ -248,14 +280,14 @@ class PurchaseService:
                 "account_id": stock_account_id,
                 "amount": total_received_value,
                 "direction": "DEBIT",
-                "description": f"Debito Estoque - Rec. NF {invoice_number}"
+                "description": f"Debito Estoque - Rec. NF {invoice_number}",
             },
             {
                 "account_id": ap_account_id,
                 "amount": total_received_value,
                 "direction": "CREDIT",
-                "description": f"Credito Fornecedores - Rec. NF {invoice_number}"
-            }
+                "description": f"Credito Fornecedores - Rec. NF {invoice_number}",
+            },
         ]
 
         await FinanceService.create_journal_entry(
@@ -265,7 +297,7 @@ class PurchaseService:
             journal_id=journal_id,
             description=f"Recebimento de Mercadorias NF-{invoice_number}",
             lines=lines,
-            status="posted"
+            status="posted",
         )
 
         # 2. Create the Bill (Contas a Pagar)
@@ -278,7 +310,7 @@ class PurchaseService:
             amount=total_received_value,
             issue_date=date.today(),
             due_date=date.today() + timedelta(days=30),
-            status="pending"
+            status="pending",
         )
         db.add(bill)
         await db.flush()

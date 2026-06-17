@@ -17,6 +17,8 @@ pydantic = {extras = ["email"], version = "^2.13.4"}
 pydantic-settings = "^2.5.2"
 redis = "^5.1.1"
 "fiscal-engine" = { path = "../fiscal-engine", develop = true }
+pyjwt = "^2.9.0"
+argon2-cffi = "^23.1.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.9"
@@ -36,10 +38,80 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "S", "B", "A", "C4", "T20", "RET", "SIM", "ARG", "ERA", "RUF"]
-ignore = []
+# N818: the codebase consistently names domain errors ``*Exception`` (a valid convention).
+ignore = ["N818"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use assert, fixture args, sample secrets and long literals.
+"tests/**" = ["S101", "S105", "S106", "E402", "E501", "ARG001", "ARG002", "ERA001"]
+# Alembic migrations are generated/large and not held to app line limits.
+"migrations/**" = ["E501", "E402", "F401"]
+# Legacy service modules predate the strict line-length bar; they are scheduled
+# for rework in Phase B (contabilidade) and carry a temporary E501 exemption.
+# New code (app/core, app/services/auth_service, routers/auth) stays fully strict.
+"app/services/finance_service.py" = ["E501"]
+"app/services/inventory_service.py" = ["E501", "ARG004"]
+"app/services/migration_service.py" = ["E501"]
+"app/services/purchase_service.py" = ["E501"]
+"app/services/reporting_service.py" = ["E501"]
+"app/services/sales_service.py" = ["E501"]
+# Legacy routers will get `raise ... from` hardening when RBAC decorators are
+# added per endpoint; temporary B904 exemption until then.
+"app/routers/finance.py" = ["B904"]
+"app/routers/fiscal.py" = ["B904"]
+"app/routers/inventory.py" = ["B904"]
+"app/routers/purchase.py" = ["B904"]
+"app/routers/reporting.py" = ["B904"]
+"app/routers/sales.py" = ["B904"]
+"app/routers/migration.py" = ["B904"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection markers are designed to be called in defaults.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Body",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Cookie",
+]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 exclude = ["migrations"]
+
+# Tests are not held to strict typing (fixtures, parametrization, etc.).
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_any_generics = false
+check_untyped_defs = false
+
+# Legacy routers/services predate strict typing; endpoints lack return-type
+# annotations. They are hardened module-by-module during Phase B rework.
+# New code (app.core.*, app.services.auth_service, app.routers.auth, app.main)
+# remains under full strict typing.
+[[tool.mypy.overrides]]
+module = [
+    "app.routers.finance",
+    "app.routers.fiscal",
+    "app.routers.inventory",
+    "app.routers.migration",
+    "app.routers.purchase",
+    "app.routers.reporting",
+    "app.routers.sales",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "app.services.sales_service",
+    "app.services.purchase_service",
+]
+disallow_any_generics = false

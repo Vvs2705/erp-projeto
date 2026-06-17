@@ -1,43 +1,62 @@
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import List, Dict, Any, Optional
-from sqlalchemy import select, func
+from typing import Any
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finance import (
-    Account, FiscalPeriod, Journal, JournalEntry, JournalLine,
-    Bill, BillPayment, Invoice, InvoicePayment
+    Account,
+    Bill,
+    BillPayment,
+    FiscalPeriod,
+    Invoice,
+    InvoicePayment,
+    Journal,
+    JournalEntry,
+    JournalLine,
 )
+
 
 # Custom Exceptions
 class FinanceException(Exception):
     """Base exception for finance module"""
+
     pass
+
 
 class FiscalPeriodNotFoundException(FinanceException):
     pass
 
+
 class FiscalPeriodLockedException(FinanceException):
     pass
+
 
 class DoubleEntryImbalanceException(FinanceException):
     pass
 
+
 class InvalidAmountException(FinanceException):
     pass
+
 
 class AccountNotFoundException(FinanceException):
     pass
 
+
 class JournalNotFoundException(FinanceException):
     pass
+
 
 class BillNotFoundException(FinanceException):
     pass
 
+
 class InvoiceNotFoundException(FinanceException):
     pass
+
 
 class OverpaymentException(FinanceException):
     pass
@@ -71,8 +90,8 @@ class FinanceService:
         entry_date: date,
         journal_id: uuid.UUID,
         description: str,
-        lines: List[Dict[str, Any]],
-        status: str = "draft"
+        lines: list[dict[str, Any]],
+        status: str = "draft",
     ) -> JournalEntry:
         """
         Business Rule: Double-entry verification.
@@ -80,14 +99,18 @@ class FinanceService:
         - Sum(debit) == Sum(credit) and both must be greater than zero.
         """
         # 1. Validate Fiscal Period
-        period = await FinanceService.get_active_fiscal_period(db, tenant_id, entry_date)
+        period = await FinanceService.get_active_fiscal_period(
+            db, tenant_id, entry_date
+        )
         if period.status in ("locked", "closed"):
             raise FiscalPeriodLockedException(
                 f"Fiscal period {period.name} is {period.status}. Modifications are blocked."
             )
 
         # 2. Check Journal Existence
-        journal_stmt = select(Journal).where(Journal.tenant_id == tenant_id, Journal.id == journal_id)
+        journal_stmt = select(Journal).where(
+            Journal.tenant_id == tenant_id, Journal.id == journal_id
+        )
         journal_res = await db.execute(journal_stmt)
         if not journal_res.scalar_one_or_none():
             raise JournalNotFoundException(f"Journal with ID {journal_id} not found.")
@@ -95,8 +118,8 @@ class FinanceService:
         # 3. Double-entry mathematical check
         debit_sum = Decimal("0.0000")
         credit_sum = Decimal("0.0000")
-        
-        parsed_lines: List[JournalLine] = []
+
+        parsed_lines: list[JournalLine] = []
         for idx, line in enumerate(lines):
             account_id = line["account_id"]
             amount = Decimal(str(line["amount"]))
@@ -104,20 +127,28 @@ class FinanceService:
             line_desc = line.get("description")
 
             if amount <= Decimal("0.0000"):
-                raise InvalidAmountException(f"Amount in line {idx} must be greater than zero.")
+                raise InvalidAmountException(
+                    f"Amount in line {idx} must be greater than zero."
+                )
 
             # Validate account exists
-            acc_stmt = select(Account).where(Account.tenant_id == tenant_id, Account.id == account_id)
+            acc_stmt = select(Account).where(
+                Account.tenant_id == tenant_id, Account.id == account_id
+            )
             acc_res = await db.execute(acc_stmt)
             if not acc_res.scalar_one_or_none():
-                raise AccountNotFoundException(f"Account with ID {account_id} not found.")
+                raise AccountNotFoundException(
+                    f"Account with ID {account_id} not found."
+                )
 
             if direction == "DEBIT":
                 debit_sum += amount
             elif direction == "CREDIT":
                 credit_sum += amount
             else:
-                raise ValueError(f"Invalid direction in line {idx}: {direction}. Must be DEBIT or CREDIT.")
+                raise ValueError(
+                    f"Invalid direction in line {idx}: {direction}. Must be DEBIT or CREDIT."
+                )
 
             parsed_lines.append(
                 JournalLine(
@@ -135,7 +166,9 @@ class FinanceService:
             )
 
         if debit_sum <= Decimal("0.0000"):
-            raise InvalidAmountException("Journal entry amount must be greater than zero.")
+            raise InvalidAmountException(
+                "Journal entry amount must be greater than zero."
+            )
 
         # 4. Create and persist Journal Entry
         entry = JournalEntry(
@@ -169,7 +202,9 @@ class FinanceService:
             return entry
 
         # Verify period is still open
-        period = await FinanceService.get_active_fiscal_period(db, tenant_id, entry.entry_date)
+        period = await FinanceService.get_active_fiscal_period(
+            db, tenant_id, entry.entry_date
+        )
         if period.status in ("locked", "closed"):
             raise FiscalPeriodLockedException(
                 f"Fiscal period {period.name} is {period.status}. Cannot post entry."
@@ -234,10 +269,20 @@ class FinanceService:
 
         # 2. Create provision Journal Entry (Partida Dobrada)
         lines = [
-            {"account_id": expense_account_id, "amount": amount, "direction": "DEBIT", "description": f"Expense provision for Bill {number}"},
-            {"account_id": ap_account_id, "amount": amount, "direction": "CREDIT", "description": f"AP provision for Bill {number}"},
+            {
+                "account_id": expense_account_id,
+                "amount": amount,
+                "direction": "DEBIT",
+                "description": f"Expense provision for Bill {number}",
+            },
+            {
+                "account_id": ap_account_id,
+                "amount": amount,
+                "direction": "CREDIT",
+                "description": f"AP provision for Bill {number}",
+            },
         ]
-        
+
         await FinanceService.create_journal_entry(
             db=db,
             tenant_id=tenant_id,
@@ -245,9 +290,9 @@ class FinanceService:
             journal_id=journal_id,
             description=f"Provision of Bill {number} - {provider_name}",
             lines=lines,
-            status="posted"
+            status="posted",
         )
-        
+
         return bill
 
     @staticmethod
@@ -258,7 +303,7 @@ class FinanceService:
         amount: Decimal,
         payment_date: date,
         payment_method: str,
-        bank_account_info: Optional[str],
+        bank_account_info: str | None,
         journal_id: uuid.UUID,
         bank_account_id: uuid.UUID,
         ap_account_id: uuid.UUID,
@@ -275,7 +320,9 @@ class FinanceService:
             raise BillNotFoundException(f"Bill with ID {bill_id} not found.")
 
         # Check total payments
-        total_paid_stmt = select(func.sum(BillPayment.amount)).where(BillPayment.bill_id == bill_id)
+        total_paid_stmt = select(func.sum(BillPayment.amount)).where(
+            BillPayment.bill_id == bill_id
+        )
         total_paid_res = await db.execute(total_paid_stmt)
         total_paid = total_paid_res.scalar() or Decimal("0.0000")
 
@@ -287,8 +334,18 @@ class FinanceService:
 
         # 2. Create the payment Journal Entry (Partida Dobrada)
         lines = [
-            {"account_id": ap_account_id, "amount": amount, "direction": "DEBIT", "description": f"AP settlement for Bill {bill.number}"},
-            {"account_id": bank_account_id, "amount": amount, "direction": "CREDIT", "description": f"Bank payment for Bill {bill.number}"},
+            {
+                "account_id": ap_account_id,
+                "amount": amount,
+                "direction": "DEBIT",
+                "description": f"AP settlement for Bill {bill.number}",
+            },
+            {
+                "account_id": bank_account_id,
+                "amount": amount,
+                "direction": "CREDIT",
+                "description": f"Bank payment for Bill {bill.number}",
+            },
         ]
 
         payment_entry = await FinanceService.create_journal_entry(
@@ -298,7 +355,7 @@ class FinanceService:
             journal_id=journal_id,
             description=f"Payment of Bill {bill.number} - {bill.provider_name}",
             lines=lines,
-            status="posted"
+            status="posted",
         )
 
         # 3. Save the Payment record
@@ -358,10 +415,20 @@ class FinanceService:
 
         # 2. Create provision Journal Entry (Partida Dobrada)
         lines = [
-            {"account_id": ar_account_id, "amount": amount, "direction": "DEBIT", "description": f"AR provision for Invoice {number}"},
-            {"account_id": revenue_account_id, "amount": amount, "direction": "CREDIT", "description": f"Revenue provision for Invoice {number}"},
+            {
+                "account_id": ar_account_id,
+                "amount": amount,
+                "direction": "DEBIT",
+                "description": f"AR provision for Invoice {number}",
+            },
+            {
+                "account_id": revenue_account_id,
+                "amount": amount,
+                "direction": "CREDIT",
+                "description": f"Revenue provision for Invoice {number}",
+            },
         ]
-        
+
         await FinanceService.create_journal_entry(
             db=db,
             tenant_id=tenant_id,
@@ -369,9 +436,9 @@ class FinanceService:
             journal_id=journal_id,
             description=f"Provision of Invoice {number} - {customer_name}",
             lines=lines,
-            status="posted"
+            status="posted",
         )
-        
+
         return invoice
 
     @staticmethod
@@ -382,7 +449,7 @@ class FinanceService:
         amount: Decimal,
         payment_date: date,
         payment_method: str,
-        bank_account_info: Optional[str],
+        bank_account_info: str | None,
         journal_id: uuid.UUID,
         bank_account_id: uuid.UUID,
         ar_account_id: uuid.UUID,
@@ -392,14 +459,18 @@ class FinanceService:
         Payment Entry: Debit (Bank/Cash Asset Account) and Credit (AR Asset Account).
         """
         # 1. Retrieve the Invoice
-        invoice_stmt = select(Invoice).where(Invoice.tenant_id == tenant_id, Invoice.id == invoice_id)
+        invoice_stmt = select(Invoice).where(
+            Invoice.tenant_id == tenant_id, Invoice.id == invoice_id
+        )
         invoice_res = await db.execute(invoice_stmt)
         invoice = invoice_res.scalar_one_or_none()
         if not invoice:
             raise InvoiceNotFoundException(f"Invoice with ID {invoice_id} not found.")
 
         # Check total payments
-        total_paid_stmt = select(func.sum(InvoicePayment.amount)).where(InvoicePayment.invoice_id == invoice_id)
+        total_paid_stmt = select(func.sum(InvoicePayment.amount)).where(
+            InvoicePayment.invoice_id == invoice_id
+        )
         total_paid_res = await db.execute(total_paid_stmt)
         total_paid = total_paid_res.scalar() or Decimal("0.0000")
 
@@ -411,8 +482,18 @@ class FinanceService:
 
         # 2. Create the payment Journal Entry (Partida Dobrada)
         lines = [
-            {"account_id": bank_account_id, "amount": amount, "direction": "DEBIT", "description": f"Bank receipt for Invoice {invoice.number}"},
-            {"account_id": ar_account_id, "amount": amount, "direction": "CREDIT", "description": f"AR settlement for Invoice {invoice.number}"},
+            {
+                "account_id": bank_account_id,
+                "amount": amount,
+                "direction": "DEBIT",
+                "description": f"Bank receipt for Invoice {invoice.number}",
+            },
+            {
+                "account_id": ar_account_id,
+                "amount": amount,
+                "direction": "CREDIT",
+                "description": f"AR settlement for Invoice {invoice.number}",
+            },
         ]
 
         payment_entry = await FinanceService.create_journal_entry(
@@ -422,7 +503,7 @@ class FinanceService:
             journal_id=journal_id,
             description=f"Receipt for Invoice {invoice.number} - {invoice.customer_name}",
             lines=lines,
-            status="posted"
+            status="posted",
         )
 
         # 3. Save the Payment record

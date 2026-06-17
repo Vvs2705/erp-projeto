@@ -1,43 +1,46 @@
+import re
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, set_session_tenant
 from app.core.security import get_current_tenant_and_user
 from app.services.finance_service import (
-    FinanceService,
-    FinanceException,
-    FiscalPeriodNotFoundException,
-    FiscalPeriodLockedException,
-    DoubleEntryImbalanceException,
-    InvalidAmountException,
     AccountNotFoundException,
-    JournalNotFoundException,
     BillNotFoundException,
+    DoubleEntryImbalanceException,
+    FinanceException,
+    FinanceService,
+    FiscalPeriodLockedException,
+    FiscalPeriodNotFoundException,
+    InvalidAmountException,
     InvoiceNotFoundException,
-    OverpaymentException
+    JournalNotFoundException,
+    OverpaymentException,
 )
 
 router = APIRouter(prefix="/api/v1/finance", tags=["Finance"])
 
 # --- Pydantic DTOs ---
 
+
 class JournalLineCreate(BaseModel):
     account_id: uuid.UUID
     amount: Decimal = Field(..., gt=0, decimal_places=4)
     direction: str = Field(..., pattern="^(DEBIT|CREDIT)$")
-    description: Optional[str] = None
+    description: str | None = None
+
 
 class JournalEntryCreate(BaseModel):
     entry_date: date
     journal_id: uuid.UUID
     description: str
-    lines: List[JournalLineCreate] = Field(..., min_length=2)
+    lines: list[JournalLineCreate] = Field(..., min_length=2)
+
 
 class BillCreate(BaseModel):
     legal_entity_id: uuid.UUID
@@ -55,17 +58,21 @@ class BillCreate(BaseModel):
     @classmethod
     def validate_cnpj(cls, v: str) -> str:
         if not re.match(r"^[A-Z0-9]{14}$", v):
-            raise ValueError("CNPJ must be exactly 14 alphanumeric uppercase characters.")
+            raise ValueError(
+                "CNPJ must be exactly 14 alphanumeric uppercase characters."
+            )
         return v
+
 
 class BillPaymentCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, decimal_places=4)
     payment_date: date
     payment_method: str
-    bank_account_info: Optional[str] = None
+    bank_account_info: str | None = None
     journal_id: uuid.UUID
     bank_account_id: uuid.UUID
     ap_account_id: uuid.UUID
+
 
 class InvoiceCreate(BaseModel):
     legal_entity_id: uuid.UUID
@@ -83,17 +90,21 @@ class InvoiceCreate(BaseModel):
     @classmethod
     def validate_cnpj(cls, v: str) -> str:
         if not re.match(r"^[A-Z0-9]{14}$", v):
-            raise ValueError("CNPJ must be exactly 14 alphanumeric uppercase characters.")
+            raise ValueError(
+                "CNPJ must be exactly 14 alphanumeric uppercase characters."
+            )
         return v
+
 
 class InvoicePaymentCreate(BaseModel):
     amount: Decimal = Field(..., gt=0, decimal_places=4)
     payment_date: date
     payment_method: str
-    bank_account_info: Optional[str] = None
+    bank_account_info: str | None = None
     journal_id: uuid.UUID
     bank_account_id: uuid.UUID
     ar_account_id: uuid.UUID
+
 
 class BankReconcileRequest(BaseModel):
     journal_entry_id: uuid.UUID
@@ -102,6 +113,7 @@ class BankReconcileRequest(BaseModel):
 
 
 # --- Endpoints ---
+
 
 @router.post("/ledger/journal-entries", status_code=status.HTTP_201_CREATED)
 async def create_journal_entry(
@@ -119,7 +131,7 @@ async def create_journal_entry(
             entry_date=payload.entry_date,
             journal_id=payload.journal_id,
             description=payload.description,
-            lines=lines_dict
+            lines=lines_dict,
         )
         await db.commit()
         return {
@@ -138,11 +150,12 @@ async def create_journal_entry(
     ) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
-
-
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ledger/journal-entries/{entry_id}/post")
@@ -163,9 +176,12 @@ async def post_journal_entry(
     except FinanceException as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ledger/fiscal-periods/{period_id}/close")
@@ -183,9 +199,12 @@ async def close_fiscal_period(
     except FiscalPeriodNotFoundException as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ap/bills", status_code=status.HTTP_201_CREATED)
@@ -229,9 +248,12 @@ async def create_bill(
     ) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ap/bills/{bill_id}/payments", status_code=status.HTTP_201_CREATED)
@@ -278,9 +300,12 @@ async def pay_bill(
     ) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ar/invoices", status_code=status.HTTP_201_CREATED)
@@ -324,9 +349,12 @@ async def create_invoice(
     ) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/ar/invoices/{invoice_id}/payments", status_code=status.HTTP_201_CREATED)
@@ -373,9 +401,12 @@ async def pay_invoice(
     ) as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 
 @router.post("/reconciliation")
@@ -396,6 +427,9 @@ async def reconcile_bank_transaction(
     if not matched:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bank transaction reconciliation failed. No matching journal entry found, or date/amount mismatch."
+            detail=(
+                "Bank transaction reconciliation failed. No matching journal "
+                "entry found, or date/amount mismatch."
+            ),
         )
     return {"reconciled": True, "journal_entry_id": payload.journal_entry_id}

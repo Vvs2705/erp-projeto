@@ -1,19 +1,21 @@
-import io
 import csv
-import uuid
+import io
 import re
+import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import List
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.finance import Partner, BankTransaction
+
+from app.models.finance import BankTransaction, Partner
+
 
 class MigrationService:
     @staticmethod
     async def import_partners_csv(
         db: AsyncSession, tenant_id: uuid.UUID, csv_content: str
-    ) -> List[Partner]:
+    ) -> list[Partner]:
         """
         Parses partners data from a CSV string and persists them in the database.
         Detects comma or semicolon as a delimiter.
@@ -37,26 +39,17 @@ class MigrationService:
         else:
             raise ValueError("CSV headers are missing.")
 
-        imported_partners: List[Partner] = []
+        imported_partners: list[Partner] = []
 
         for row in reader:
             name = row.get("name", "")
-            if name is not None:
-                name = name.strip()
-            else:
-                name = ""
+            name = name.strip() if name is not None else ""
 
             cnpj_raw = row.get("cnpj", "")
-            if cnpj_raw is not None:
-                cnpj_raw = cnpj_raw.strip()
-            else:
-                cnpj_raw = ""
+            cnpj_raw = cnpj_raw.strip() if cnpj_raw is not None else ""
 
             ptype = row.get("type", "")
-            if ptype is not None:
-                ptype = ptype.strip().lower()
-            else:
-                ptype = ""
+            ptype = ptype.strip().lower() if ptype is not None else ""
 
             if not name or not cnpj_raw or not ptype:
                 continue
@@ -66,13 +59,19 @@ class MigrationService:
 
             # Validate CNPJ format (Brazilian Alphanumeric CNPJ is 14 characters)
             if len(cnpj) != 14:
-                raise ValueError(f"CNPJ must be exactly 14 characters, got '{cnpj_raw}' (parsed as '{cnpj}')")
+                raise ValueError(
+                    f"CNPJ must be exactly 14 characters, got '{cnpj_raw}' (parsed as '{cnpj}')"
+                )
 
             if ptype not in ["customer", "supplier", "both"]:
-                raise ValueError(f"Invalid partner type '{ptype}'. Must be 'customer', 'supplier', or 'both'.")
+                raise ValueError(
+                    f"Invalid partner type '{ptype}'. Must be 'customer', 'supplier', or 'both'."
+                )
 
             # Check if partner already exists for this tenant
-            stmt = select(Partner).where(Partner.tenant_id == tenant_id, Partner.cnpj == cnpj)
+            stmt = select(Partner).where(
+                Partner.tenant_id == tenant_id, Partner.cnpj == cnpj
+            )
             res = await db.execute(stmt)
             existing_partner = res.scalar_one_or_none()
 
@@ -83,10 +82,7 @@ class MigrationService:
                 imported_partners.append(existing_partner)
             else:
                 new_partner = Partner(
-                    tenant_id=tenant_id,
-                    name=name,
-                    cnpj=cnpj,
-                    type=ptype
+                    tenant_id=tenant_id, name=name, cnpj=cnpj, type=ptype
                 )
                 db.add(new_partner)
                 imported_partners.append(new_partner)
@@ -97,7 +93,7 @@ class MigrationService:
     @staticmethod
     async def import_bank_statement_ofx(
         db: AsyncSession, tenant_id: uuid.UUID, ofx_content: str
-    ) -> List[BankTransaction]:
+    ) -> list[BankTransaction]:
         """
         Parses a simplified OFX bank statement file and stores the transaction records.
         Expected fields inside <STMTTRN>: <DTPOSTED>, <TRNAMT>, <FITID>, <MEMO> or <NAME>
@@ -106,7 +102,7 @@ class MigrationService:
         if not ofx_content.strip():
             return []
 
-        imported_transactions: List[BankTransaction] = []
+        imported_transactions: list[BankTransaction] = []
 
         # Split content by <STMTTRN>
         parts = ofx_content.split("<STMTTRN>")
@@ -115,21 +111,18 @@ class MigrationService:
             dtposted_match = re.search(r"<DTPOSTED>\s*([0-9]{8})", part, re.IGNORECASE)
             trnamt_match = re.search(r"<TRNAMT>\s*(-?[0-9.]+)", part, re.IGNORECASE)
             fitid_match = re.search(r"<FITID>\s*([^\s<]+)", part, re.IGNORECASE)
-            
+
             # Description can be in <MEMO> or <NAME>
             memo_match = re.search(r"<MEMO>\s*([^<\r\n]+)", part, re.IGNORECASE)
             name_match = re.search(r"<NAME>\s*([^<\r\n]+)", part, re.IGNORECASE)
-            
+
             description = ""
             if name_match:
                 description = name_match.group(1).strip()
             if memo_match:
                 memo = memo_match.group(1).strip()
-                if description:
-                    description = f"{description} - {memo}"
-                else:
-                    description = memo
-            
+                description = f"{description} - {memo}" if description else memo
+
             if not description:
                 description = "Bank Transaction"
 
@@ -144,7 +137,9 @@ class MigrationService:
             amount = Decimal(amount_str)
 
             # Check if this FITID already exists for the tenant
-            stmt = select(BankTransaction).where(BankTransaction.tenant_id == tenant_id, BankTransaction.fitid == fitid)
+            stmt = select(BankTransaction).where(
+                BankTransaction.tenant_id == tenant_id, BankTransaction.fitid == fitid
+            )
             res = await db.execute(stmt)
             existing_tx = res.scalar_one_or_none()
 
@@ -157,7 +152,7 @@ class MigrationService:
                 transaction_date=transaction_date,
                 amount=amount,
                 description=description,
-                reconciled=False
+                reconciled=False,
             )
             db.add(new_tx)
             imported_transactions.append(new_tx)

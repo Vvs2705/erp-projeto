@@ -1,26 +1,28 @@
-import pytest
 import uuid
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
-from app.models.finance import FiscalPeriod, Journal, Account, JournalEntry, Bill, Invoice
-from app.services.finance_service import (
-    FinanceService,
-    FiscalPeriodNotFoundException,
-    FiscalPeriodLockedException,
-    DoubleEntryImbalanceException,
-    InvalidAmountException,
-    AccountNotFoundException,
-    JournalNotFoundException,
-    BillNotFoundException,
-    InvoiceNotFoundException,
-    OverpaymentException
+import pytest
+
+from app.models.finance import (
+    Account,
+    Bill,
+    FiscalPeriod,
+    Journal,
+    JournalEntry,
 )
+from app.services.finance_service import (
+    DoubleEntryImbalanceException,
+    FinanceService,
+    FiscalPeriodLockedException,
+)
+
 
 @pytest.fixture
 def mock_db():
     return AsyncMock()
+
 
 @pytest.mark.asyncio
 async def test_create_journal_entry_success(mock_db):
@@ -36,13 +38,23 @@ async def test_create_journal_entry_success(mock_db):
         name="2026-06",
         start_date=date(2026, 6, 1),
         end_date=date(2026, 6, 30),
-        status="open"
+        status="open",
     )
     # Mock Journal query
-    mock_journal = Journal(id=journal_id, tenant_id=tenant_id, name="Cash Journal", code="CASH")
+    mock_journal = Journal(
+        id=journal_id, tenant_id=tenant_id, name="Cash Journal", code="CASH"
+    )
     # Mock Accounts query
-    mock_acc1 = Account(id=acc1_id, tenant_id=tenant_id, code="1.1.01.001", name="Cash", type="asset")
-    mock_acc2 = Account(id=acc2_id, tenant_id=tenant_id, code="4.1.01.001", name="Sales Revenue", type="revenue")
+    mock_acc1 = Account(
+        id=acc1_id, tenant_id=tenant_id, code="1.1.01.001", name="Cash", type="asset"
+    )
+    mock_acc2 = Account(
+        id=acc2_id,
+        tenant_id=tenant_id,
+        code="4.1.01.001",
+        name="Sales Revenue",
+        type="revenue",
+    )
 
     # Set up mock execute results sequentially
     # 1. Fiscal period, 2. Journal, 3. Account 1, 4. Account 2
@@ -50,13 +62,13 @@ async def test_create_journal_entry_success(mock_db):
         MagicMock(scalar_one_or_none=lambda: mock_period),
         MagicMock(scalar_one_or_none=lambda: mock_journal),
         MagicMock(scalar_one_or_none=lambda: mock_acc1),
-        MagicMock(scalar_one_or_none=lambda: mock_acc2)
+        MagicMock(scalar_one_or_none=lambda: mock_acc2),
     ]
     mock_db.execute.side_effect = mock_execute_results
 
     lines = [
         {"account_id": acc1_id, "amount": 100.0, "direction": "DEBIT"},
-        {"account_id": acc2_id, "amount": 100.0, "direction": "CREDIT"}
+        {"account_id": acc2_id, "amount": 100.0, "direction": "CREDIT"},
     ]
 
     entry = await FinanceService.create_journal_entry(
@@ -65,7 +77,7 @@ async def test_create_journal_entry_success(mock_db):
         entry_date=date(2026, 6, 15),
         journal_id=journal_id,
         description="Sale",
-        lines=lines
+        lines=lines,
     )
 
     assert entry.status == "draft"
@@ -90,22 +102,32 @@ async def test_create_journal_entry_imbalanced(mock_db):
         name="2026-06",
         start_date=date(2026, 6, 1),
         end_date=date(2026, 6, 30),
-        status="open"
+        status="open",
     )
-    mock_journal = Journal(id=journal_id, tenant_id=tenant_id, name="Cash Journal", code="CASH")
-    mock_acc1 = Account(id=acc1_id, tenant_id=tenant_id, code="1.1.01.001", name="Cash", type="asset")
-    mock_acc2 = Account(id=acc2_id, tenant_id=tenant_id, code="4.1.01.001", name="Sales Revenue", type="revenue")
+    mock_journal = Journal(
+        id=journal_id, tenant_id=tenant_id, name="Cash Journal", code="CASH"
+    )
+    mock_acc1 = Account(
+        id=acc1_id, tenant_id=tenant_id, code="1.1.01.001", name="Cash", type="asset"
+    )
+    mock_acc2 = Account(
+        id=acc2_id,
+        tenant_id=tenant_id,
+        code="4.1.01.001",
+        name="Sales Revenue",
+        type="revenue",
+    )
 
     mock_db.execute.side_effect = [
         MagicMock(scalar_one_or_none=lambda: mock_period),
         MagicMock(scalar_one_or_none=lambda: mock_journal),
         MagicMock(scalar_one_or_none=lambda: mock_acc1),
-        MagicMock(scalar_one_or_none=lambda: mock_acc2)
+        MagicMock(scalar_one_or_none=lambda: mock_acc2),
     ]
 
     lines = [
         {"account_id": acc1_id, "amount": 100.0, "direction": "DEBIT"},
-        {"account_id": acc2_id, "amount": 99.0, "direction": "CREDIT"}
+        {"account_id": acc2_id, "amount": 99.0, "direction": "CREDIT"},
     ]
 
     with pytest.raises(DoubleEntryImbalanceException):
@@ -115,7 +137,7 @@ async def test_create_journal_entry_imbalanced(mock_db):
             entry_date=date(2026, 6, 15),
             journal_id=journal_id,
             description="Imbalanced Sale",
-            lines=lines
+            lines=lines,
         )
 
 
@@ -130,13 +152,13 @@ async def test_create_journal_entry_locked_period(mock_db):
         name="2026-05",
         start_date=date(2026, 5, 1),
         end_date=date(2026, 5, 31),
-        status="locked"
+        status="locked",
     )
     mock_db.execute.return_value = MagicMock(scalar_one_or_none=lambda: mock_period)
 
     lines = [
         {"account_id": uuid.uuid4(), "amount": 100.0, "direction": "DEBIT"},
-        {"account_id": uuid.uuid4(), "amount": 100.0, "direction": "CREDIT"}
+        {"account_id": uuid.uuid4(), "amount": 100.0, "direction": "CREDIT"},
     ]
 
     with pytest.raises(FiscalPeriodLockedException):
@@ -146,7 +168,7 @@ async def test_create_journal_entry_locked_period(mock_db):
             entry_date=date(2026, 5, 15),
             journal_id=journal_id,
             description="Sale",
-            lines=lines
+            lines=lines,
         )
 
 
@@ -161,7 +183,7 @@ async def test_close_fiscal_period(mock_db):
         name="2026-06",
         start_date=date(2026, 6, 1),
         end_date=date(2026, 6, 30),
-        status="open"
+        status="open",
     )
     mock_db.execute.return_value = MagicMock(scalar_one_or_none=lambda: mock_period)
 
@@ -178,16 +200,29 @@ async def test_create_bill_and_provision(mock_db):
     ap_acc_id = uuid.uuid4()
 
     # Mock checks for provision Journal Entry
-    mock_period = FiscalPeriod(id=uuid.uuid4(), tenant_id=tenant_id, name="2026-06", start_date=date(2026, 6, 1), end_date=date(2026, 6, 30), status="open")
-    mock_journal = Journal(id=journal_id, tenant_id=tenant_id, name="Purchases", code="PUR")
-    mock_expense = Account(id=expense_acc_id, tenant_id=tenant_id, code="5.1", name="Exp", type="expense")
-    mock_ap = Account(id=ap_acc_id, tenant_id=tenant_id, code="2.1", name="AP", type="liability")
+    mock_period = FiscalPeriod(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="2026-06",
+        start_date=date(2026, 6, 1),
+        end_date=date(2026, 6, 30),
+        status="open",
+    )
+    mock_journal = Journal(
+        id=journal_id, tenant_id=tenant_id, name="Purchases", code="PUR"
+    )
+    mock_expense = Account(
+        id=expense_acc_id, tenant_id=tenant_id, code="5.1", name="Exp", type="expense"
+    )
+    mock_ap = Account(
+        id=ap_acc_id, tenant_id=tenant_id, code="2.1", name="AP", type="liability"
+    )
 
     mock_db.execute.side_effect = [
         MagicMock(scalar_one_or_none=lambda: mock_period),
         MagicMock(scalar_one_or_none=lambda: mock_journal),
         MagicMock(scalar_one_or_none=lambda: mock_expense),
-        MagicMock(scalar_one_or_none=lambda: mock_ap)
+        MagicMock(scalar_one_or_none=lambda: mock_ap),
     ]
 
     bill = await FinanceService.create_bill(
@@ -231,14 +266,25 @@ async def test_pay_bill_and_entry(mock_db):
     )
 
     # Mocks for payment check, total paid check, journal creation
-    mock_period = FiscalPeriod(id=uuid.uuid4(), tenant_id=tenant_id, name="2026-06", start_date=date(2026, 6, 1), end_date=date(2026, 6, 30), status="open")
+    mock_period = FiscalPeriod(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        name="2026-06",
+        start_date=date(2026, 6, 1),
+        end_date=date(2026, 6, 30),
+        status="open",
+    )
     mock_journal = Journal(id=journal_id, tenant_id=tenant_id, name="Cash", code="CSH")
-    mock_ap = Account(id=ap_acc_id, tenant_id=tenant_id, code="2.1", name="AP", type="liability")
-    mock_bank = Account(id=bank_acc_id, tenant_id=tenant_id, code="1.1", name="Bank", type="asset")
+    mock_ap = Account(
+        id=ap_acc_id, tenant_id=tenant_id, code="2.1", name="AP", type="liability"
+    )
+    mock_bank = Account(
+        id=bank_acc_id, tenant_id=tenant_id, code="1.1", name="Bank", type="asset"
+    )
 
     mock_db.execute.side_effect = [
         MagicMock(scalar_one_or_none=lambda: mock_bill),
-        MagicMock(scalar=lambda: Decimal("0.0")), # total paid previously
+        MagicMock(scalar=lambda: Decimal("0.0")),  # total paid previously
         MagicMock(scalar_one_or_none=lambda: mock_period),
         MagicMock(scalar_one_or_none=lambda: mock_journal),
         MagicMock(scalar_one_or_none=lambda: mock_ap),
@@ -277,7 +323,7 @@ async def test_reconcile_bank_transaction(mock_db):
     # Add lines: 1 debit of 100, 1 credit of 100
     mock_entry.lines = [
         MagicMock(direction="DEBIT", amount=Decimal("100.00")),
-        MagicMock(direction="CREDIT", amount=Decimal("100.00"))
+        MagicMock(direction="CREDIT", amount=Decimal("100.00")),
     ]
 
     mock_db.execute.return_value = MagicMock(scalar_one_or_none=lambda: mock_entry)

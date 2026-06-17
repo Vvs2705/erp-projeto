@@ -1,16 +1,27 @@
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import List, Dict, Any
-from sqlalchemy import select, func, case
+from typing import Any
+
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.finance import Account, JournalLine, JournalEntry, Bill, BillPayment, Invoice, InvoicePayment
+
+from app.models.finance import (
+    Account,
+    Bill,
+    BillPayment,
+    Invoice,
+    InvoicePayment,
+    JournalEntry,
+    JournalLine,
+)
+
 
 class ReportingService:
     @staticmethod
     async def get_trial_balance(
         db: AsyncSession, tenant_id: uuid.UUID, start_date: date, end_date: date
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generates the Balancete de Verificação (Trial Balance).
         For each account, calculates the initial balance, period debits, period credits, and final balance.
@@ -25,43 +36,90 @@ class ReportingService:
                 func.coalesce(
                     func.sum(
                         case(
-                            (JournalEntry.entry_date < start_date, 
-                             case((JournalLine.direction == "DEBIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                JournalEntry.entry_date < start_date,
+                                case(
+                                    (
+                                        JournalLine.direction == "DEBIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
+                    ),
+                    0,
                 ).label("debit_before"),
                 func.coalesce(
                     func.sum(
                         case(
-                            (JournalEntry.entry_date < start_date, 
-                             case((JournalLine.direction == "CREDIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                JournalEntry.entry_date < start_date,
+                                case(
+                                    (
+                                        JournalLine.direction == "CREDIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
+                    ),
+                    0,
                 ).label("credit_before"),
                 func.coalesce(
                     func.sum(
                         case(
-                            ((JournalEntry.entry_date >= start_date) & (JournalEntry.entry_date <= end_date), 
-                             case((JournalLine.direction == "DEBIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                (JournalEntry.entry_date >= start_date)
+                                & (JournalEntry.entry_date <= end_date),
+                                case(
+                                    (
+                                        JournalLine.direction == "DEBIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
+                    ),
+                    0,
                 ).label("debit_period"),
                 func.coalesce(
                     func.sum(
                         case(
-                            ((JournalEntry.entry_date >= start_date) & (JournalEntry.entry_date <= end_date), 
-                             case((JournalLine.direction == "CREDIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                (JournalEntry.entry_date >= start_date)
+                                & (JournalEntry.entry_date <= end_date),
+                                case(
+                                    (
+                                        JournalLine.direction == "CREDIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
-                ).label("credit_period")
+                    ),
+                    0,
+                ).label("credit_period"),
             )
             .select_from(Account)
-            .outerjoin(JournalLine, (Account.id == JournalLine.account_id) & (JournalLine.tenant_id == tenant_id))
-            .outerjoin(JournalEntry, (JournalLine.journal_entry_id == JournalEntry.id) & (JournalEntry.status == "posted") & (JournalEntry.tenant_id == tenant_id))
+            .outerjoin(
+                JournalLine,
+                (Account.id == JournalLine.account_id)
+                & (JournalLine.tenant_id == tenant_id),
+            )
+            .outerjoin(
+                JournalEntry,
+                (JournalLine.journal_entry_id == JournalEntry.id)
+                & (JournalEntry.status == "posted")
+                & (JournalEntry.tenant_id == tenant_id),
+            )
             .where(Account.tenant_id == tenant_id)
             .group_by(Account.id, Account.code, Account.name, Account.type)
             .order_by(Account.code)
@@ -109,22 +167,26 @@ class ReportingService:
             total_debit_period += debit_period
             total_credit_period += credit_period
 
-            accounts_report.append({
-                "account_id": row.id,
-                "code": row.code,
-                "name": row.name,
-                "type": row.type,
-                "initial_balance": initial_balance,
-                "initial_direction": initial_direction,
-                "debit": debit_period,
-                "credit": credit_period,
-                "final_balance": final_balance,
-                "final_direction": final_direction
-            })
+            accounts_report.append(
+                {
+                    "account_id": row.id,
+                    "code": row.code,
+                    "name": row.name,
+                    "type": row.type,
+                    "initial_balance": initial_balance,
+                    "initial_direction": initial_direction,
+                    "debit": debit_period,
+                    "credit": credit_period,
+                    "final_balance": final_balance,
+                    "final_direction": final_direction,
+                }
+            )
 
         # Arithmetic validation
         is_balanced = abs(total_final_debit - total_final_credit) < Decimal("0.0001")
-        initial_is_balanced = abs(total_initial_debit - total_initial_credit) < Decimal("0.0001")
+        initial_is_balanced = abs(total_initial_debit - total_initial_credit) < Decimal(
+            "0.0001"
+        )
 
         if not is_balanced:
             raise ValueError(
@@ -145,13 +207,13 @@ class ReportingService:
                 "is_balanced": is_balanced,
                 "initial_is_balanced": initial_is_balanced,
             },
-            "accounts": accounts_report
+            "accounts": accounts_report,
         }
 
     @staticmethod
     async def get_income_statement(
         db: AsyncSession, tenant_id: uuid.UUID, start_date: date, end_date: date
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generates the Demonstração do Resultado do Exercício (DRE).
         Groups Revenue and Expense accounts, calculating Gross Revenue, Total Expenses, and Net Result.
@@ -165,26 +227,57 @@ class ReportingService:
                 func.coalesce(
                     func.sum(
                         case(
-                            ((JournalEntry.entry_date >= start_date) & (JournalEntry.entry_date <= end_date), 
-                             case((JournalLine.direction == "DEBIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                (JournalEntry.entry_date >= start_date)
+                                & (JournalEntry.entry_date <= end_date),
+                                case(
+                                    (
+                                        JournalLine.direction == "DEBIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
+                    ),
+                    0,
                 ).label("debit_period"),
                 func.coalesce(
                     func.sum(
                         case(
-                            ((JournalEntry.entry_date >= start_date) & (JournalEntry.entry_date <= end_date), 
-                             case((JournalLine.direction == "CREDIT", JournalLine.amount), else_=0)),
-                            else_=0
+                            (
+                                (JournalEntry.entry_date >= start_date)
+                                & (JournalEntry.entry_date <= end_date),
+                                case(
+                                    (
+                                        JournalLine.direction == "CREDIT",
+                                        JournalLine.amount,
+                                    ),
+                                    else_=0,
+                                ),
+                            ),
+                            else_=0,
                         )
-                    ), 0
-                ).label("credit_period")
+                    ),
+                    0,
+                ).label("credit_period"),
             )
             .select_from(Account)
-            .outerjoin(JournalLine, (Account.id == JournalLine.account_id) & (JournalLine.tenant_id == tenant_id))
-            .outerjoin(JournalEntry, (JournalLine.journal_entry_id == JournalEntry.id) & (JournalEntry.status == "posted") & (JournalEntry.tenant_id == tenant_id))
-            .where(Account.tenant_id == tenant_id, Account.type.in_(["revenue", "expense"]))
+            .outerjoin(
+                JournalLine,
+                (Account.id == JournalLine.account_id)
+                & (JournalLine.tenant_id == tenant_id),
+            )
+            .outerjoin(
+                JournalEntry,
+                (JournalLine.journal_entry_id == JournalEntry.id)
+                & (JournalEntry.status == "posted")
+                & (JournalEntry.tenant_id == tenant_id),
+            )
+            .where(
+                Account.tenant_id == tenant_id, Account.type.in_(["revenue", "expense"])
+            )
             .group_by(Account.id, Account.code, Account.name, Account.type)
             .order_by(Account.code)
         )
@@ -205,22 +298,26 @@ class ReportingService:
                 # Revenues have a normal credit balance
                 amount = credit_period - debit_period
                 gross_revenue += amount
-                revenue_details.append({
-                    "account_id": row.id,
-                    "code": row.code,
-                    "name": row.name,
-                    "amount": amount
-                })
+                revenue_details.append(
+                    {
+                        "account_id": row.id,
+                        "code": row.code,
+                        "name": row.name,
+                        "amount": amount,
+                    }
+                )
             elif row.type == "expense":
                 # Expenses have a normal debit balance
                 amount = debit_period - credit_period
                 total_expenses += amount
-                expense_details.append({
-                    "account_id": row.id,
-                    "code": row.code,
-                    "name": row.name,
-                    "amount": amount
-                })
+                expense_details.append(
+                    {
+                        "account_id": row.id,
+                        "code": row.code,
+                        "name": row.name,
+                        "amount": amount,
+                    }
+                )
 
         net_result = gross_revenue - total_expenses
 
@@ -231,13 +328,13 @@ class ReportingService:
             "total_expenses": total_expenses,
             "net_result": net_result,
             "revenue_details": revenue_details,
-            "expense_details": expense_details
+            "expense_details": expense_details,
         }
 
     @staticmethod
     async def get_ageing_report(
         db: AsyncSession, tenant_id: uuid.UUID, ageing_type: str, reference_date: date
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculates the ageing report for Accounts Payable (AP) or Accounts Receivable (AR).
         Groups open items (Bill or Invoice with status pending/partially_paid) into ageing buckets:
@@ -261,12 +358,27 @@ class ReportingService:
                     Bill.amount,
                     Bill.issue_date,
                     Bill.due_date,
-                    func.coalesce(func.sum(BillPayment.amount), 0).label("paid_amount")
+                    func.coalesce(func.sum(BillPayment.amount), 0).label("paid_amount"),
                 )
                 .select_from(Bill)
-                .outerjoin(BillPayment, (Bill.id == BillPayment.bill_id) & (BillPayment.tenant_id == tenant_id))
-                .where(Bill.tenant_id == tenant_id, Bill.status.in_(["pending", "partially_paid"]))
-                .group_by(Bill.id, Bill.number, Bill.provider_name, Bill.cnpj, Bill.amount, Bill.issue_date, Bill.due_date)
+                .outerjoin(
+                    BillPayment,
+                    (Bill.id == BillPayment.bill_id)
+                    & (BillPayment.tenant_id == tenant_id),
+                )
+                .where(
+                    Bill.tenant_id == tenant_id,
+                    Bill.status.in_(["pending", "partially_paid"]),
+                )
+                .group_by(
+                    Bill.id,
+                    Bill.number,
+                    Bill.provider_name,
+                    Bill.cnpj,
+                    Bill.amount,
+                    Bill.issue_date,
+                    Bill.due_date,
+                )
             )
         else:
             stmt = (
@@ -278,12 +390,29 @@ class ReportingService:
                     Invoice.amount,
                     Invoice.issue_date,
                     Invoice.due_date,
-                    func.coalesce(func.sum(InvoicePayment.amount), 0).label("paid_amount")
+                    func.coalesce(func.sum(InvoicePayment.amount), 0).label(
+                        "paid_amount"
+                    ),
                 )
                 .select_from(Invoice)
-                .outerjoin(InvoicePayment, (Invoice.id == InvoicePayment.invoice_id) & (InvoicePayment.tenant_id == tenant_id))
-                .where(Invoice.tenant_id == tenant_id, Invoice.status.in_(["pending", "partially_paid"]))
-                .group_by(Invoice.id, Invoice.number, Invoice.customer_name, Invoice.cnpj, Invoice.amount, Invoice.issue_date, Invoice.due_date)
+                .outerjoin(
+                    InvoicePayment,
+                    (Invoice.id == InvoicePayment.invoice_id)
+                    & (InvoicePayment.tenant_id == tenant_id),
+                )
+                .where(
+                    Invoice.tenant_id == tenant_id,
+                    Invoice.status.in_(["pending", "partially_paid"]),
+                )
+                .group_by(
+                    Invoice.id,
+                    Invoice.number,
+                    Invoice.customer_name,
+                    Invoice.cnpj,
+                    Invoice.amount,
+                    Invoice.issue_date,
+                    Invoice.due_date,
+                )
             )
 
         result = await db.execute(stmt)
@@ -326,18 +455,20 @@ class ReportingService:
 
             total_open += open_balance
 
-            details.append({
-                "id": row.id,
-                "number": row.number,
-                "partner_name": row.partner_name,
-                "cnpj": row.cnpj,
-                "amount": amount,
-                "open_balance": open_balance,
-                "issue_date": row.issue_date,
-                "due_date": row.due_date,
-                "days_overdue": days_overdue,
-                "bucket": bucket
-            })
+            details.append(
+                {
+                    "id": row.id,
+                    "number": row.number,
+                    "partner_name": row.partner_name,
+                    "cnpj": row.cnpj,
+                    "amount": amount,
+                    "open_balance": open_balance,
+                    "issue_date": row.issue_date,
+                    "due_date": row.due_date,
+                    "days_overdue": days_overdue,
+                    "bucket": bucket,
+                }
+            )
 
         return {
             "ageing_type": ageing_type_upper,
@@ -348,7 +479,7 @@ class ReportingService:
                 "overdue_31_60": overdue_31_60,
                 "overdue_61_90": overdue_61_90,
                 "overdue_above_90": overdue_above_90,
-                "total_open": total_open
+                "total_open": total_open,
             },
-            "details": details
+            "details": details,
         }

@@ -1,20 +1,25 @@
 import uuid
 from decimal import Decimal
-from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory import Product, StockMove, StockValuation
 
+
 class InventoryException(Exception):
     """Base exception for inventory service"""
+
     pass
+
 
 class InsufficientStockException(InventoryException):
     pass
 
+
 class ProductNotFoundException(InventoryException):
     pass
+
 
 class InventoryService:
     @staticmethod
@@ -23,7 +28,7 @@ class InventoryService:
     ) -> StockValuation:
         stmt = select(StockValuation).where(
             StockValuation.tenant_id == tenant_id,
-            StockValuation.product_id == product_id
+            StockValuation.product_id == product_id,
         )
         res = await db.execute(stmt)
         val = res.scalar_one_or_none()
@@ -33,7 +38,7 @@ class InventoryService:
                 product_id=product_id,
                 qty_on_hand=Decimal("0.0000"),
                 average_unit_cost=Decimal("0.0000"),
-                total_value=Decimal("0.0000")
+                total_value=Decimal("0.0000"),
             )
             db.add(val)
             await db.flush()
@@ -48,13 +53,15 @@ class InventoryService:
         move_type: str,
         quantity: Decimal,
         unit_cost: Decimal,
-        reference: str
+        reference: str,
     ) -> StockMove:
         """
         Registers a stock movement, updates the stock valuation using MPM, and saves both records.
         """
         # Validate product exists
-        prod_stmt = select(Product).where(Product.tenant_id == tenant_id, Product.id == product_id)
+        prod_stmt = select(Product).where(
+            Product.tenant_id == tenant_id, Product.id == product_id
+        )
         prod_res = await db.execute(prod_stmt)
         if not prod_res.scalar_one_or_none():
             raise ProductNotFoundException(f"Product with ID {product_id} not found.")
@@ -62,19 +69,23 @@ class InventoryService:
         # Ensure correct type
         qty = Decimal(str(quantity))
         u_cost = Decimal(str(unit_cost))
-        
+
         if qty <= Decimal("0.0000"):
             raise InventoryException("Quantity must be greater than zero.")
 
         # Fetch or create stock valuation
-        valuation = await InventoryService.get_or_create_valuation(db, tenant_id, product_id)
+        valuation = await InventoryService.get_or_create_valuation(
+            db, tenant_id, product_id
+        )
 
         actual_unit_cost = u_cost
         if move_type == "in":
             valuation.qty_on_hand += qty
             valuation.total_value += qty * u_cost
             if valuation.qty_on_hand > Decimal("0.0000"):
-                valuation.average_unit_cost = valuation.total_value / valuation.qty_on_hand
+                valuation.average_unit_cost = (
+                    valuation.total_value / valuation.qty_on_hand
+                )
             else:
                 valuation.average_unit_cost = Decimal("0.0000")
             total_cost = qty * u_cost
@@ -88,7 +99,9 @@ class InventoryService:
             valuation.total_value -= qty * actual_unit_cost
             total_cost = qty * actual_unit_cost
         else:
-            raise InventoryException(f"Invalid move_type: {move_type}. Must be 'in' or 'out'.")
+            raise InventoryException(
+                f"Invalid move_type: {move_type}. Must be 'in' or 'out'."
+            )
 
         # Create stock move
         stock_move = StockMove(
@@ -98,7 +111,7 @@ class InventoryService:
             quantity=qty,
             unit_cost=actual_unit_cost,
             total_cost=total_cost,
-            reference=reference
+            reference=reference,
         )
         db.add(stock_move)
         await db.flush()
