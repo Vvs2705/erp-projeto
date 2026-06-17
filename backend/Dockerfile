@@ -28,9 +28,12 @@ RUN apt-get update \
 # install poetry - respects $POETRY_VERSION & $POETRY_HOME
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
+# Copia o pacote local fiscal-engine para que poetry resolva a dependência de path.
+COPY fiscal-engine /opt/fiscal-engine
+
 # copy project requirement files here to ensure they will be cached.
 WORKDIR $PYSETUP_PATH
-COPY pyproject.toml ./
+COPY backend/pyproject.toml backend/poetry.lock ./
 
 # install runtime deps - uses $POETRY_VIRTUALENVS_IN_PROJECT=true and creates venv inside $PYSETUP_PATH
 RUN poetry install --no-root --only main
@@ -56,8 +59,10 @@ COPY --from=builder $PYSETUP_PATH $PYSETUP_PATH
 # create a non-privileged user and set permissions
 RUN addgroup --system app && adduser --system --group app
 WORKDIR /app
-COPY . /app
-RUN chown -R app:app /app
+COPY backend/ /app
+# main.py adiciona o repo root ao sys.path para importar integrations/
+COPY integrations/ /integrations
+RUN chown -R app:app /app /integrations
 
 USER app
 EXPOSE 8000
