@@ -62,6 +62,9 @@ crash.log
 Thumbs.db
 desktop.ini
 
+# ─── Claude Code (config pessoal/local — NÃO versionar) ───
+.claude/settings.local.json
+
 # ─── Logs / temporários ───────────────────────────────────
 *.log
 logs/
