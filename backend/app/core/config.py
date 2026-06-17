@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/erp_v"
 
     # JWT / authentication
-    SECRET_KEY: str = "dev-only-change-me"
+    SECRET_KEY: str = "dev-only-insecure-secret-change-in-production-32+"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14

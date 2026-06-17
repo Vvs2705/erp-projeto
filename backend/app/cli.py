@@ -141,9 +141,7 @@ async def create_owner(
         ).scalar_one_or_none()
         if has_role is None:
             db.add(
-                UserRole(
-                    user_id=user.id, tenant_id=tenant.id, role_id=owner_role.id
-                )
+                UserRole(user_id=user.id, tenant_id=tenant.id, role_id=owner_role.id)
             )
 
         await db.commit()

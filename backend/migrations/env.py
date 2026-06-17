@@ -17,6 +17,7 @@ if config.config_file_name is not None:
 # Import base metadata. We try to import app.core.database.Base,
 # if it is not present yet, we fall back to a placeholder metadata.
 try:
+    import app.models  # -- register all models on Base.metadata
     from app.core.database import Base
 
     target_metadata = Base.metadata

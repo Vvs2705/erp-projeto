@@ -312,11 +312,15 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.core.security import get_current_tenant_and_user
+from app.core.tokens import create_access_token
 from app.main import app
 
-client = TestClient(app)
 mock_tenant_id = uuid.uuid4()
 mock_user_id = uuid.uuid4()
+
+# Authenticated test client: a valid access token whose claims match the mocks.
+_token = create_access_token(mock_user_id, mock_tenant_id, [])
+client = TestClient(app, headers={"Authorization": f"Bearer {_token}"})
 
 # Override security dependency to return our mock values
 app.dependency_overrides[get_current_tenant_and_user] = lambda: (

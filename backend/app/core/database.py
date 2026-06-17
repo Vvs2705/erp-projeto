@@ -40,8 +40,7 @@ class Base(DeclarativeBase):
 # is the variable read by Row-Level Security policies. No-op on non-PostgreSQL
 # backends (e.g. SQLite used in unit tests).
 async def set_session_tenant(db: AsyncSession, tenant_id: uuid.UUID | str) -> None:
-    bind = db.get_bind()
-    if bind.dialect.name != "postgresql":
+    if engine.sync_engine.dialect.name != "postgresql":
         return
     await db.execute(
         text("SELECT set_config('app.current_tenant_id', :tenant_id, true)"),
