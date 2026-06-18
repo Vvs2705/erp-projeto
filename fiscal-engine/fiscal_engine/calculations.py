@@ -1,78 +1,48 @@
+"""Facade de compatibilidade sobre o motor de determinação versionado.
+
+Mantém o contrato histórico de ``TaxEngine.calculate_taxes`` (dict com todas as
+chaves de tributo + ``total_taxes``), mas toda a lógica passa pelo motor
+versionado por vigência em :mod:`fiscal_engine.determination`.
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Dict, Any, Union
+
+from fiscal_engine.determination import Operation, Regime, determine
+
+_ALL_TAXES = ("icms", "ipi", "pis", "cofins", "iss", "cbs", "ibs")
+
+
+def _parse_date(value: date | datetime | str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return datetime.fromisoformat(value).date()
+    return value
+
 
 class TaxEngine:
     @staticmethod
     def calculate_taxes(
-        amount: Union[Decimal, float, str, int],
-        issue_date: Union[date, datetime, str],
+        amount: Decimal | float | str | int,
+        issue_date: date | datetime | str,
         is_service: bool = False,
-        icms_rate: Union[Decimal, float, str] = "0.18",
-        ipi_rate: Union[Decimal, float, str] = "0.05",
-        pis_rate: Union[Decimal, float, str] = "0.0165",
-        cofins_rate: Union[Decimal, float, str] = "0.076",
-        iss_rate: Union[Decimal, float, str] = "0.05",
-    ) -> Dict[str, Decimal]:
+    ) -> dict[str, Decimal]:
+        """Calcula os tributos de um valor/data, delegando ao motor versionado.
+
+        Retorna um dict com todas as chaves de tributo (zeradas quando não
+        incidem) e ``total_taxes``. Usa Lucro Presumido (PIS/COFINS destacados)
+        para preservar o comportamento histórico.
         """
-        Computes standard Brazilian taxes and the CBS/IBS 2026 reform transition rates.
-        
-        Args:
-            amount: The base value for tax calculation.
-            issue_date: Date or datetime of emission.
-            is_service: True if service (applies ISS/PIS/COFINS), False if product (applies ICMS/IPI/PIS/COFINS).
-            icms_rate: ICMS tax rate (default: 18%)
-            ipi_rate: IPI tax rate (default: 5%)
-            pis_rate: PIS tax rate (default: 1.65%)
-            cofins_rate: COFINS tax rate (default: 7.6%)
-            iss_rate: ISS tax rate (default: 5%)
-            
-        Returns:
-            Dict containing individual tax amounts and the total_taxes.
-        """
-        # Ensure base amount is Decimal
-        amount_dec = Decimal(str(amount))
-        
-        # Parse issue_date into a date object
-        if isinstance(issue_date, datetime):
-            parsed_date = issue_date.date()
-        elif isinstance(issue_date, str):
-            # Try parsing date, then datetime
-            try:
-                parsed_date = date.fromisoformat(issue_date)
-            except ValueError:
-                parsed_date = datetime.fromisoformat(issue_date).date()
-        else:
-            parsed_date = issue_date
+        parsed_date = _parse_date(issue_date)
+        operation = Operation.SALE_SERVICE if is_service else Operation.SALE_GOODS
+        result = determine(amount, parsed_date, operation, Regime.PRESUMIDO)
 
-        # Initialize tax dictionary
-        taxes = {
-            "icms": Decimal("0.00"),
-            "ipi": Decimal("0.00"),
-            "pis": Decimal("0.00"),
-            "cofins": Decimal("0.00"),
-            "iss": Decimal("0.00"),
-            "cbs": Decimal("0.00"),
-            "ibs": Decimal("0.00"),
-            "total_taxes": Decimal("0.00"),
-        }
-
-        # Traditional taxes
-        if is_service:
-            taxes["iss"] = (amount_dec * Decimal(str(iss_rate))).quantize(Decimal("0.01"))
-            taxes["pis"] = (amount_dec * Decimal(str(pis_rate))).quantize(Decimal("0.01"))
-            taxes["cofins"] = (amount_dec * Decimal(str(cofins_rate))).quantize(Decimal("0.01"))
-        else:
-            taxes["icms"] = (amount_dec * Decimal(str(icms_rate))).quantize(Decimal("0.01"))
-            taxes["ipi"] = (amount_dec * Decimal(str(ipi_rate))).quantize(Decimal("0.01"))
-            taxes["pis"] = (amount_dec * Decimal(str(pis_rate))).quantize(Decimal("0.01"))
-            taxes["cofins"] = (amount_dec * Decimal(str(cofins_rate))).quantize(Decimal("0.01"))
-
-        # 2026 Tax Reform transition highlight
-        if parsed_date >= date(2026, 1, 1):
-            taxes["cbs"] = (amount_dec * Decimal("0.009")).quantize(Decimal("0.01"))
-            taxes["ibs"] = (amount_dec * Decimal("0.001")).quantize(Decimal("0.01"))
-
-        # Calculate sum of all taxes
-        taxes["total_taxes"] = sum(v for k, v in taxes.items() if k != "total_taxes")
+        taxes: dict[str, Decimal] = {tax: Decimal("0.00") for tax in _ALL_TAXES}
+        for line in result.lines:
+            taxes[line.tax] = line.amount
+        taxes["total_taxes"] = result.total_taxes
         return taxes
