@@ -75,6 +75,7 @@ tmp/
 # Regra do dono: arquivos de melhorias e instruções não sobem para o repo público.
 MEMORIA-PROJETO.md
 Projeto ERP.md
+CONTINUE-DAQUI.md
 /progress/
 /docs/analise_estrategica_competitiva_2026.md
 /docs/blueprint_architecture.md
