@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -24,7 +25,7 @@ async def import_partners_csv(
     payload: CsvImportRequest,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     try:
         partners = await MigrationService.import_partners_csv(
@@ -43,12 +44,14 @@ async def import_partners_csv(
         }
     except ValueError as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        ) from e
 
 
 @router.post("/bank-statement/ofx", status_code=status.HTTP_201_CREATED)
@@ -56,7 +59,7 @@ async def import_bank_statement_ofx(
     payload: OfxImportRequest,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     try:
         transactions = await MigrationService.import_bank_statement_ofx(
@@ -83,9 +86,11 @@ async def import_bank_statement_ofx(
         }
     except ValueError as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        ) from e

@@ -74,9 +74,7 @@ ignore = ["N818"]
 "app/routers/finance.py" = ["B904"]
 "app/routers/inventory.py" = ["B904"]
 "app/routers/purchase.py" = ["B904"]
-"app/routers/reporting.py" = ["B904"]
 "app/routers/sales.py" = ["B904"]
-"app/routers/migration.py" = ["B904"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency-injection markers are designed to be called in defaults.
@@ -114,9 +112,7 @@ check_untyped_defs = false
 module = [
     "app.routers.finance",
     "app.routers.inventory",
-    "app.routers.migration",
     "app.routers.purchase",
-    "app.routers.reporting",
     "app.routers.sales",
 ]
 disallow_untyped_defs = false

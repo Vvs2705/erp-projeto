@@ -1,5 +1,6 @@
 import uuid
 from datetime import date
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ async def get_trial_balance(
     end_date: date = Query(..., description="End date of the report"),
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     if end_date < start_date:
         raise HTTPException(
@@ -31,11 +32,11 @@ async def get_trial_balance(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        ) from e
 
 
 @router.get("/income-statement")
@@ -44,7 +45,7 @@ async def get_income_statement(
     end_date: date = Query(..., description="End date of the report"),
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     if end_date < start_date:
         raise HTTPException(
@@ -58,7 +59,7 @@ async def get_income_statement(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        ) from e
 
 
 @router.get("/ageing")
@@ -69,7 +70,7 @@ async def get_ageing(
     ),
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     ageing_type_upper = ageing_type.upper()
     if ageing_type_upper not in ["AP", "AR"]:
@@ -84,4 +85,4 @@ async def get_ageing(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
+        ) from e
