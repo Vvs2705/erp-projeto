@@ -17,6 +17,9 @@ from typing import Any, TypeVar
 
 import asyncpg
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.services.tenant_purge_service import purge_tenant
 
 PG_DSN = os.environ.get("TEST_PG_DSN")
 APP_ROLE = "erp_app_test"
@@ -240,6 +243,125 @@ async def _rls_fiscal_document_taxes() -> None:
         await su.close()
 
 
+def _sqlalchemy_url() -> str:
+    assert PG_DSN is not None
+    return PG_DSN.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+
+async def _purge_tenant_remove_tudo() -> None:
+    su = await asyncpg.connect(dsn=PG_DSN)
+    t_a, t_b = uuid.uuid4(), uuid.uuid4()
+    acc, jrn, ent, line = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    fdt = uuid.uuid4()
+    r_a, r_b = uuid.uuid4(), uuid.uuid4()
+    try:
+        await su.execute(
+            "INSERT INTO tenants(id,name,slug,status,subscription_price,billing_limit,"
+            "created_at,updated_at) VALUES "
+            "($1,'A',$2,'active',0,0,now(),now()),($3,'B',$4,'active',0,0,now(),now())",
+            t_a,
+            f"purge-a-{t_a}",
+            t_b,
+            f"purge-b-{t_b}",
+        )
+        await su.execute(
+            "INSERT INTO roles(id,tenant_id,name,is_system,created_at,updated_at) "
+            "VALUES ($1,$2,'RoleA',false,now(),now()),($3,$4,'RoleB',false,now(),now())",
+            r_a,
+            t_a,
+            r_b,
+            t_b,
+        )
+        # Tenant A com lançamento POSTADO (imutável) — bloqueia o DELETE normal.
+        await su.execute(
+            "INSERT INTO accounts(id,tenant_id,code,name,type,nature,allow_posting,"
+            "status,created_at,updated_at) "
+            "VALUES ($1,$2,'1.1','Caixa','asset','debit',true,'active',now(),now())",
+            acc,
+            t_a,
+        )
+        await su.execute(
+            "INSERT INTO journals(id,tenant_id,name,code,created_at,updated_at) "
+            "VALUES ($1,$2,'J','J1',now(),now())",
+            jrn,
+            t_a,
+        )
+        await su.execute(
+            "INSERT INTO journal_entries(id,tenant_id,entry_date,journal_id,"
+            "description,status,created_at,updated_at) "
+            "VALUES ($1,$2,current_date,$3,'e','posted',now(),now())",
+            ent,
+            t_a,
+            jrn,
+        )
+        await su.execute(
+            "INSERT INTO journal_lines(id,tenant_id,journal_entry_id,account_id,"
+            "amount,direction,description,created_at,updated_at) "
+            "VALUES ($1,$2,$3,$4,100,'DEBIT','l',now(),now())",
+            line,
+            t_a,
+            ent,
+            acc,
+        )
+        await su.execute(
+            "INSERT INTO fiscal_document_taxes(id,tenant_id,document_type,document_id,"
+            "document_number,direction,tax,base,rate,amount,issue_date,created_at) "
+            "VALUES ($1,$2,'sale',$3,'NF-A','debit','cbs',1000,0.009,9,current_date,now())",
+            fdt,
+            t_a,
+            uuid.uuid4(),
+        )
+
+        # O DELETE normal é bloqueado pelo trigger de imutabilidade (cascata).
+        with pytest.raises(asyncpg.PostgresError):
+            await su.execute("DELETE FROM tenants WHERE id=$1", t_a)
+
+        # Purga privilegiada remove tudo do tenant A.
+        engine = create_async_engine(_sqlalchemy_url())
+        try:
+            async with engine.begin() as conn:
+                counts = await purge_tenant(conn, t_a)
+        finally:
+            await engine.dispose()
+
+        assert counts["tenants"] == 1
+        assert counts["journal_entries"] >= 1
+        assert counts["journal_lines"] >= 1
+
+        # Tenant A: nada sobra.
+        assert (await su.fetchval("SELECT count(*) FROM tenants WHERE id=$1", t_a)) == 0
+        assert (
+            await su.fetchval(
+                "SELECT count(*) FROM journal_entries WHERE tenant_id=$1", t_a
+            )
+        ) == 0
+        assert (
+            await su.fetchval(
+                "SELECT count(*) FROM fiscal_document_taxes WHERE tenant_id=$1", t_a
+            )
+        ) == 0
+        # Tenant B: intacto (sem dano colateral).
+        assert (await su.fetchval("SELECT count(*) FROM roles WHERE id=$1", r_b)) == 1
+    finally:
+        # Limpeza resiliente: triggers off nesta sessão (resetado ao fechar).
+        ids = [t_a, t_b]
+        await su.execute("SET session_replication_role = replica")
+        await su.execute(
+            "DELETE FROM journal_lines WHERE tenant_id = ANY($1::uuid[])", ids
+        )
+        await su.execute(
+            "DELETE FROM journal_entries WHERE tenant_id = ANY($1::uuid[])", ids
+        )
+        await su.execute("DELETE FROM journals WHERE tenant_id = ANY($1::uuid[])", ids)
+        await su.execute("DELETE FROM accounts WHERE tenant_id = ANY($1::uuid[])", ids)
+        await su.execute(
+            "DELETE FROM fiscal_document_taxes WHERE tenant_id = ANY($1::uuid[])", ids
+        )
+        await su.execute("DELETE FROM roles WHERE tenant_id = ANY($1::uuid[])", ids)
+        await su.execute("DELETE FROM tenants WHERE id = ANY($1::uuid[])", ids)
+        await su.close()
+
+
 def test_rls_isolation_entre_tenants() -> None:
     _run(_rls_isolation())
 
@@ -250,3 +372,7 @@ def test_imutabilidade_de_lancamentos_postados() -> None:
 
 def test_rls_fiscal_document_taxes() -> None:
     _run(_rls_fiscal_document_taxes())
+
+
+def test_purge_tenant_remove_tudo() -> None:
+    _run(_purge_tenant_remove_tudo())
