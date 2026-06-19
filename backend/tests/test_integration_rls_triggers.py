@@ -178,9 +178,75 @@ async def _immutability_triggers() -> None:
         await su.close()
 
 
+async def _rls_fiscal_document_taxes() -> None:
+    su = await asyncpg.connect(dsn=PG_DSN)
+    t_a, t_b = uuid.uuid4(), uuid.uuid4()
+    x_a, x_b = uuid.uuid4(), uuid.uuid4()
+    try:
+        await _ensure_app_role(su)
+        await su.execute(
+            "INSERT INTO tenants(id,name,slug,status,subscription_price,billing_limit,"
+            "created_at,updated_at) VALUES "
+            "($1,'A',$2,'active',0,0,now(),now()),($3,'B',$4,'active',0,0,now(),now())",
+            t_a,
+            f"fdt-a-{t_a}",
+            t_b,
+            f"fdt-b-{t_b}",
+        )
+        await su.execute(
+            "INSERT INTO fiscal_document_taxes(id,tenant_id,document_type,document_id,"
+            "document_number,direction,tax,base,rate,amount,issue_date,created_at) "
+            "VALUES "
+            "($1,$2,'sale',$3,'NF-A','debit','cbs',1000,0.009,9,current_date,now()),"
+            "($4,$5,'sale',$6,'NF-B','debit','cbs',1000,0.009,9,current_date,now())",
+            x_a,
+            t_a,
+            uuid.uuid4(),
+            x_b,
+            t_b,
+            uuid.uuid4(),
+        )
+
+        app = await _connect_app()
+        try:
+            # Tenant A vê apenas o seu tributo.
+            await app.execute(
+                "SELECT set_config('app.current_tenant_id', $1, false)", str(t_a)
+            )
+            visible = {
+                row["id"]
+                for row in await app.fetch(
+                    "SELECT id FROM fiscal_document_taxes WHERE id = ANY($1::uuid[])",
+                    [x_a, x_b],
+                )
+            }
+            assert visible == {x_a}, f"vazou entre tenants: {visible}"
+
+            # Sem tenant setado: nada é visível (deny by default).
+            await app.execute("SELECT set_config('app.current_tenant_id', '', false)")
+            visible_none = await app.fetch(
+                "SELECT id FROM fiscal_document_taxes WHERE id = ANY($1::uuid[])",
+                [x_a, x_b],
+            )
+            assert visible_none == [], f"deveria negar sem tenant: {visible_none}"
+        finally:
+            await app.close()
+    finally:
+        await su.execute(
+            "DELETE FROM fiscal_document_taxes WHERE tenant_id = ANY($1::uuid[])",
+            [t_a, t_b],
+        )
+        await su.execute("DELETE FROM tenants WHERE id = ANY($1::uuid[])", [t_a, t_b])
+        await su.close()
+
+
 def test_rls_isolation_entre_tenants() -> None:
     _run(_rls_isolation())
 
 
 def test_imutabilidade_de_lancamentos_postados() -> None:
     _run(_immutability_triggers())
+
+
+def test_rls_fiscal_document_taxes() -> None:
+    _run(_rls_fiscal_document_taxes())

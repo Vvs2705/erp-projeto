@@ -7,6 +7,7 @@ class being imported/registered, which importing the submodules guarantees.
 from app.models import (  # noqa: F401
     auth,
     finance,
+    fiscal,
     inventory,
     purchase,
     sales,
