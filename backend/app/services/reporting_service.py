@@ -24,8 +24,10 @@ class ReportingService:
     ) -> dict[str, Any]:
         """
         Generates the Balancete de Verificação (Trial Balance).
-        For each account, calculates the initial balance, period debits, period credits, and final balance.
-        Ensures the sum of all final debit balances equals the sum of all final credit balances.
+        For each account, calculates the initial balance, period debits, period
+        credits, and final balance.
+        Ensures the sum of all final debit balances equals the sum of all final
+        credit balances.
         """
         stmt = (
             select(
@@ -190,8 +192,9 @@ class ReportingService:
 
         if not is_balanced:
             raise ValueError(
-                f"Arithmetic imbalance in Trial Balance: total final debits ({total_final_debit}) "
-                f"does not equal total final credits ({total_final_credit})."
+                f"Arithmetic imbalance in Trial Balance: total final debits "
+                f"({total_final_debit}) does not equal total final credits "
+                f"({total_final_credit})."
             )
 
         return {
@@ -216,7 +219,8 @@ class ReportingService:
     ) -> dict[str, Any]:
         """
         Generates the Demonstração do Resultado do Exercício (DRE).
-        Groups Revenue and Expense accounts, calculating Gross Revenue, Total Expenses, and Net Result.
+        Groups Revenue and Expense accounts, calculating Gross Revenue, Total
+        Expenses, and Net Result.
         """
         stmt = (
             select(
@@ -336,8 +340,10 @@ class ReportingService:
         db: AsyncSession, tenant_id: uuid.UUID, ageing_type: str, reference_date: date
     ) -> dict[str, Any]:
         """
-        Calculates the ageing report for Accounts Payable (AP) or Accounts Receivable (AR).
-        Groups open items (Bill or Invoice with status pending/partially_paid) into ageing buckets:
+        Calculates the ageing report for Accounts Payable (AP) or Accounts
+        Receivable (AR).
+        Groups open items (Bill or Invoice with status pending/partially_paid)
+        into ageing buckets:
         - A vencer (Not yet due)
         - Atrasado 1-30 dias
         - Atrasado 31-60 dias
@@ -431,7 +437,8 @@ class ReportingService:
             paid_amount = Decimal(str(row.paid_amount))
             open_balance = amount - paid_amount
 
-            # Ignore fully paid rows that might have status pending/partially_paid due to delay
+            # Ignore fully paid rows that might still carry a
+            # pending/partially_paid status due to delay
             if open_balance <= Decimal("0.0000"):
                 continue
 

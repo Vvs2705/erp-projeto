@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +61,7 @@ class PurchaseService:
         tenant_id: uuid.UUID,
         provider_name: str,
         cnpj: str,
-        items: list[dict],
+        items: list[dict[str, Any]],
     ) -> PurchaseOrder:
         """
         Creates a Purchase Order with its items.
@@ -130,7 +131,8 @@ class PurchaseService:
         1. Updates quantity_received on PurchaseOrderItem.
         2. Calls register_stock_move(move_type='in') for each item.
         3. Creates a Bill (Contas a Pagar) for the received items value.
-        4. Posts JournalEntry: Debit Stock Account (Asset) and Credit AP Account (Liability).
+        4. Posts JournalEntry: Debit Stock Account (Asset) and Credit AP Account
+           (Liability).
         """
         # Fetch the Purchase Order with items
         po_stmt = select(PurchaseOrder).where(
@@ -145,7 +147,8 @@ class PurchaseService:
 
         if po.status != "approved":
             raise PurchaseException(
-                f"Purchase order must be approved before receiving. Current status: {po.status}"
+                "Purchase order must be approved before receiving. "
+                f"Current status: {po.status}"
             )
 
         # Resolve organization_id if not provided
@@ -190,7 +193,8 @@ class PurchaseService:
 
             if not matched_item:
                 raise PurchaseOrderItemNotFoundException(
-                    f"Product {prod_id} is not part of Purchase Order {purchase_order_id}."
+                    f"Product {prod_id} is not part of Purchase Order "
+                    f"{purchase_order_id}."
                 )
 
             # Update quantity received

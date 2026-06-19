@@ -118,7 +118,8 @@ class FinanceService:
         )
         if period.status in ("locked", "closed"):
             raise FiscalPeriodLockedException(
-                f"Fiscal period {period.name} is {period.status}. Modifications are blocked."
+                f"Fiscal period {period.name} is {period.status}. "
+                "Modifications are blocked."
             )
 
         # 2. Check Journal Existence
@@ -161,7 +162,8 @@ class FinanceService:
                 credit_sum += amount
             else:
                 raise ValueError(
-                    f"Invalid direction in line {idx}: {direction}. Must be DEBIT or CREDIT."
+                    f"Invalid direction in line {idx}: {direction}. "
+                    "Must be DEBIT or CREDIT."
                 )
 
             parsed_lines.append(
@@ -323,8 +325,10 @@ class FinanceService:
         ap_account_id: uuid.UUID,
     ) -> BillPayment:
         """
-        Accounts Payable: Pays a Bill (fully or partially) and generates the payment ledger entry.
-        Payment Entry: Debit (AP Liability Account) and Credit (Bank/Cash Asset Account).
+        Accounts Payable: Pays a Bill (fully or partially) and generates the
+        payment ledger entry.
+        Payment Entry: Debit (AP Liability Account) and Credit (Bank/Cash Asset
+        Account).
         """
         # 1. Retrieve the Bill
         bill_stmt = select(Bill).where(Bill.tenant_id == tenant_id, Bill.id == bill_id)
@@ -469,8 +473,10 @@ class FinanceService:
         ar_account_id: uuid.UUID,
     ) -> InvoicePayment:
         """
-        Accounts Receivable: Receives payment for an Invoice (fully or partially) and generates the payment ledger entry.
-        Payment Entry: Debit (Bank/Cash Asset Account) and Credit (AR Asset Account).
+        Accounts Receivable: Receives payment for an Invoice (fully or
+        partially) and generates the payment ledger entry.
+        Payment Entry: Debit (Bank/Cash Asset Account) and Credit (AR Asset
+        Account).
         """
         # 1. Retrieve the Invoice
         invoice_stmt = select(Invoice).where(
@@ -491,7 +497,8 @@ class FinanceService:
         remaining = invoice.amount - total_paid
         if amount > remaining:
             raise OverpaymentException(
-                f"Receipt amount {amount} exceeds remaining invoice balance {remaining}."
+                f"Receipt amount {amount} exceeds remaining invoice "
+                f"balance {remaining}."
             )
 
         # 2. Create the payment Journal Entry (Partida Dobrada)
@@ -515,7 +522,9 @@ class FinanceService:
             tenant_id=tenant_id,
             entry_date=payment_date,
             journal_id=journal_id,
-            description=f"Receipt for Invoice {invoice.number} - {invoice.customer_name}",
+            description=(
+                f"Receipt for Invoice {invoice.number} - {invoice.customer_name}"
+            ),
             lines=lines,
             status="posted",
         )
@@ -550,7 +559,8 @@ class FinanceService:
         journal_id: uuid.UUID,
         reason: str,
     ) -> JournalEntry:
-        """Estorno contábil: cria um lançamento de reversão com débitos e créditos invertidos.
+        """Estorno contábil: cria um lançamento de reversão com débitos e
+        créditos invertidos.
 
         O lançamento original permanece imutável; o estorno é um novo lançamento
         postado com sinal oposto e referência ao original na descrição.
@@ -581,7 +591,9 @@ class FinanceService:
                     "account_id": line.account_id,
                     "amount": line.amount,
                     "direction": inverted_direction,
-                    "description": f"ESTORNO: {line.description or original.description}",
+                    "description": (
+                        f"ESTORNO: {line.description or original.description}"
+                    ),
                 }
             )
 
@@ -706,7 +718,9 @@ class FinanceService:
                             "account_id": row.id,
                             "amount": abs(balance),
                             "direction": "DEBIT",
-                            "description": "Encerramento de receita - apuracao de resultado",
+                            "description": (
+                                "Encerramento de receita - apuracao de resultado"
+                            ),
                         }
                     )
             else:
@@ -719,7 +733,9 @@ class FinanceService:
                             "account_id": row.id,
                             "amount": abs(balance),
                             "direction": "CREDIT",
-                            "description": "Encerramento de despesa - apuracao de resultado",
+                            "description": (
+                                "Encerramento de despesa - apuracao de resultado"
+                            ),
                         }
                     )
 
@@ -737,7 +753,9 @@ class FinanceService:
                     "account_id": retained_earnings_account_id,
                     "amount": net_result,
                     "direction": "CREDIT",
-                    "description": f"Apuração de resultado — lucro do período {period.name}",
+                    "description": (
+                        f"Apuração de resultado — lucro do período {period.name}"
+                    ),
                 }
             )
         else:
@@ -747,7 +765,9 @@ class FinanceService:
                     "account_id": retained_earnings_account_id,
                     "amount": abs(net_result),
                     "direction": "DEBIT",
-                    "description": f"Apuração de resultado — prejuízo do período {period.name}",
+                    "description": (
+                        f"Apuração de resultado — prejuízo do período {period.name}"
+                    ),
                 }
             )
 
