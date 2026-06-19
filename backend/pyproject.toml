@@ -69,12 +69,6 @@ ignore = ["N818"]
 "app/services/purchase_service.py" = ["E501"]
 "app/services/reporting_service.py" = ["E501"]
 "app/services/sales_service.py" = ["E501"]
-# Legacy routers will get `raise ... from` hardening when RBAC decorators are
-# added per endpoint; temporary B904 exemption until then.
-"app/routers/finance.py" = ["B904"]
-"app/routers/inventory.py" = ["B904"]
-"app/routers/purchase.py" = ["B904"]
-"app/routers/sales.py" = ["B904"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI dependency-injection markers are designed to be called in defaults.
@@ -104,20 +98,8 @@ disallow_incomplete_defs = false
 disallow_any_generics = false
 check_untyped_defs = false
 
-# Legacy routers/services predate strict typing; endpoints lack return-type
-# annotations. They are hardened module-by-module during Phase B rework.
-# New code (app.core.*, app.services.auth_service, app.routers.auth, app.main)
-# remains under full strict typing.
-[[tool.mypy.overrides]]
-module = [
-    "app.routers.finance",
-    "app.routers.inventory",
-    "app.routers.purchase",
-    "app.routers.sales",
-]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-
+# Legacy services predate strict typing (any-generics on dict returns); hardened
+# module-by-module. New code remains under full strict typing.
 [[tool.mypy.overrides]]
 module = [
     "app.services.sales_service",

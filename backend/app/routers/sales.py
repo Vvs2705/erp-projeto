@@ -1,6 +1,7 @@
 import re
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -70,7 +71,7 @@ async def create_quotation(
     payload: SalesQuotationCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -90,12 +91,12 @@ async def create_quotation(
             "status": quotation.status,
             "total_amount": quotation.total_amount,
         }
-    except Exception:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
@@ -103,7 +104,7 @@ async def create_sales_order(
     payload: SalesOrderCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -123,12 +124,12 @@ async def create_sales_order(
             "status": so.status,
             "total_amount": so.total_amount,
         }
-    except Exception:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders/{sales_order_id}/approve")
@@ -136,7 +137,7 @@ async def approve_sales_order(
     sales_order_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -145,13 +146,13 @@ async def approve_sales_order(
         return {"id": so.id, "customer_name": so.customer_name, "status": so.status}
     except SalesOrderNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders/{sales_order_id}/dispatch", status_code=status.HTTP_201_CREATED)
@@ -160,7 +161,7 @@ async def dispatch_sales_order_items(
     payload: DispatchSOItemsRequest,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -188,13 +189,15 @@ async def dispatch_sales_order_items(
         }
     except SalesOrderNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except SalesException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e

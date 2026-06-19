@@ -2,6 +2,7 @@ import re
 import uuid
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -120,7 +121,7 @@ async def create_journal_entry(
     payload: JournalEntryCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -149,13 +150,15 @@ async def create_journal_entry(
         JournalNotFoundException,
     ) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ledger/journal-entries/{entry_id}/post")
@@ -163,7 +166,7 @@ async def post_journal_entry(
     entry_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -172,16 +175,18 @@ async def post_journal_entry(
         return {"id": entry.id, "status": entry.status}
     except (FiscalPeriodNotFoundException, FiscalPeriodLockedException) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
     except FinanceException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ledger/fiscal-periods/{period_id}/close")
@@ -189,7 +194,7 @@ async def close_fiscal_period(
     period_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -198,13 +203,13 @@ async def close_fiscal_period(
         return {"id": period.id, "name": period.name, "status": period.status}
     except FiscalPeriodNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ap/bills", status_code=status.HTTP_201_CREATED)
@@ -212,7 +217,7 @@ async def create_bill(
     payload: BillCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -247,13 +252,15 @@ async def create_bill(
         JournalNotFoundException,
     ) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ap/bills/{bill_id}/payments", status_code=status.HTTP_201_CREATED)
@@ -262,7 +269,7 @@ async def pay_bill(
     payload: BillPaymentCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -288,7 +295,7 @@ async def pay_bill(
         }
     except BillNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except (
         FiscalPeriodNotFoundException,
         FiscalPeriodLockedException,
@@ -299,13 +306,15 @@ async def pay_bill(
         OverpaymentException,
     ) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ar/invoices", status_code=status.HTTP_201_CREATED)
@@ -313,7 +322,7 @@ async def create_invoice(
     payload: InvoiceCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -348,13 +357,15 @@ async def create_invoice(
         JournalNotFoundException,
     ) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/ar/invoices/{invoice_id}/payments", status_code=status.HTTP_201_CREATED)
@@ -363,7 +374,7 @@ async def pay_invoice(
     payload: InvoicePaymentCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -389,7 +400,7 @@ async def pay_invoice(
         }
     except InvoiceNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except (
         FiscalPeriodNotFoundException,
         FiscalPeriodLockedException,
@@ -400,13 +411,15 @@ async def pay_invoice(
         OverpaymentException,
     ) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/reconciliation")
@@ -414,7 +427,7 @@ async def reconcile_bank_transaction(
     payload: BankReconcileRequest,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     matched = await FinanceService.reconcile_bank_transaction(

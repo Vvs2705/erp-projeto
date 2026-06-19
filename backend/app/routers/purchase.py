@@ -1,6 +1,7 @@
 import re
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
@@ -57,7 +58,7 @@ async def create_requisition(
     payload: RequisitionCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -66,12 +67,12 @@ async def create_requisition(
         )
         await db.commit()
         return {"id": req.id, "description": req.description, "status": req.status}
-    except Exception:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/requisitions/{requisition_id}/approve")
@@ -79,7 +80,7 @@ async def approve_requisition(
     requisition_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -88,13 +89,15 @@ async def approve_requisition(
         return {"id": req.id, "description": req.description, "status": req.status}
     except PurchaseException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
@@ -102,7 +105,7 @@ async def create_purchase_order(
     payload: PurchaseOrderCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -122,12 +125,12 @@ async def create_purchase_order(
             "status": po.status,
             "total_amount": po.total_amount,
         }
-    except Exception:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders/{purchase_order_id}/approve")
@@ -135,7 +138,7 @@ async def approve_purchase_order(
     purchase_order_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -146,13 +149,13 @@ async def approve_purchase_order(
         return {"id": po.id, "provider_name": po.provider_name, "status": po.status}
     except PurchaseOrderNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/orders/{purchase_order_id}/receive", status_code=status.HTTP_201_CREATED)
@@ -161,7 +164,7 @@ async def receive_purchase_order_items(
     payload: ReceivePOItemsRequest,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -187,13 +190,15 @@ async def receive_purchase_order_items(
         }
     except PurchaseOrderNotFoundException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     except PurchaseException as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e

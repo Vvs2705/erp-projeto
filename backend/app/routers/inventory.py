@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db, set_session_tenant
 from app.core.security import get_current_tenant_and_user
 from app.models.inventory import Product
+from app.models.tenant import Organization
 from app.services.inventory_service import (
     InsufficientStockException,
     InventoryException,
@@ -37,11 +39,10 @@ async def create_product(
     payload: ProductCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
-        # Check if SKU already exists for this tenant
         existing_stmt = select(Product).where(
             Product.tenant_id == tenant_id, Product.sku == payload.sku
         )
@@ -69,12 +70,12 @@ async def create_product(
     except HTTPException:
         await db.rollback()
         raise
-    except Exception:
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/stock-movements", status_code=status.HTTP_201_CREATED)
@@ -82,13 +83,10 @@ async def register_stock_movement(
     payload: StockMoveCreate,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
-        # Resolve organization_id (using default organization lookup or similar)
-        from app.models.tenant import Organization
-
         org_stmt = select(Organization).where(Organization.tenant_id == tenant_id)
         org_res = await db.execute(org_stmt)
         org = org_res.scalar()
@@ -118,18 +116,20 @@ async def register_stock_movement(
             "total_cost": stock_move.total_cost,
             "reference": stock_move.reference,
         }
-    except InsufficientStockException as e:
+    except HTTPException:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except InventoryException as e:
+        raise
+    except (InsufficientStockException, InventoryException) as e:
         await db.rollback()
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except Exception as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.get("/stock-valuations/{product_id}")
@@ -137,7 +137,7 @@ async def get_stock_valuation(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
-):
+) -> dict[str, Any]:
     tenant_id, _ = tenant_and_user
     await set_session_tenant(db, tenant_id)
     try:
@@ -150,8 +150,8 @@ async def get_stock_valuation(
             "average_unit_cost": valuation.average_unit_cost,
             "total_value": valuation.total_value,
         }
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
