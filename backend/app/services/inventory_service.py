@@ -56,7 +56,8 @@ class InventoryService:
         reference: str,
     ) -> StockMove:
         """
-        Registers a stock movement, updates the stock valuation using MPM, and saves both records.
+        Registers a stock movement, updates the stock valuation using MPM, and
+        saves both records.
         """
         # Validate product exists
         prod_stmt = select(Product).where(
@@ -92,7 +93,8 @@ class InventoryService:
         elif move_type == "out":
             if valuation.qty_on_hand < qty:
                 raise InsufficientStockException(
-                    f"Insufficient stock for product {product_id}. Available: {valuation.qty_on_hand}, Requested: {qty}"
+                    f"Insufficient stock for product {product_id}. "
+                    f"Available: {valuation.qty_on_hand}, Requested: {qty}"
                 )
             actual_unit_cost = valuation.average_unit_cost
             valuation.qty_on_hand -= qty
@@ -106,6 +108,7 @@ class InventoryService:
         # Create stock move
         stock_move = StockMove(
             tenant_id=tenant_id,
+            organization_id=organization_id,
             product_id=product_id,
             move_type=move_type,
             quantity=qty,

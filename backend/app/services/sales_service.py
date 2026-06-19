@@ -1,6 +1,7 @@
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +34,7 @@ class SalesService:
         tenant_id: uuid.UUID,
         customer_name: str,
         cnpj: str,
-        items: list[dict],
+        items: list[dict[str, Any]],
     ) -> SalesQuotation:
         """
         Creates a Sales Quotation.
@@ -62,7 +63,7 @@ class SalesService:
         tenant_id: uuid.UUID,
         customer_name: str,
         cnpj: str,
-        items: list[dict],
+        items: list[dict[str, Any]],
     ) -> SalesOrder:
         """
         Creates a Sales Order with its items.
@@ -131,10 +132,13 @@ class SalesService:
         """
         Processes dispatch of SO items:
         1. Updates quantity_dispatched on SalesOrderItem.
-        2. Calls register_stock_move(move_type='out') for each item, retrieving its MPM value.
-        3. Generates CMV JournalEntry: Debit CMV Account (Expense) and Credit Stock Account (Asset).
+        2. Calls register_stock_move(move_type='out') for each item, retrieving
+           its MPM value.
+        3. Generates CMV JournalEntry: Debit CMV Account (Expense) and Credit
+           Stock Account (Asset).
         4. Creates an Invoice (Contas a Receber) for the sales revenue.
-        5. Generates Sales JournalEntry: Debit AR Account (Asset) and Credit Revenue Account (Revenue).
+        5. Generates Sales JournalEntry: Debit AR Account (Asset) and Credit
+           Revenue Account (Revenue).
         """
         # Fetch Sales Order
         so_stmt = select(SalesOrder).where(
@@ -149,7 +153,8 @@ class SalesService:
 
         if so.status != "approved":
             raise SalesException(
-                f"Sales order must be approved before dispatching. Current status: {so.status}"
+                "Sales order must be approved before dispatching. "
+                f"Current status: {so.status}"
             )
 
         # Resolve organization_id if not provided
