@@ -21,7 +21,8 @@ class MigrationService:
         Detects comma or semicolon as a delimiter.
         Expected headers: name, cnpj, type
         CNPJ will be stripped of non-alphanumeric characters.
-        If a partner with the same CNPJ and tenant_id already exists, updates the name and type.
+        If a partner with the same CNPJ and tenant_id already exists, updates
+        the name and type.
         """
         if not csv_content.strip():
             return []
@@ -60,12 +61,14 @@ class MigrationService:
             # Validate CNPJ format (Brazilian Alphanumeric CNPJ is 14 characters)
             if len(cnpj) != 14:
                 raise ValueError(
-                    f"CNPJ must be exactly 14 characters, got '{cnpj_raw}' (parsed as '{cnpj}')"
+                    f"CNPJ must be exactly 14 characters, "
+                    f"got '{cnpj_raw}' (parsed as '{cnpj}')"
                 )
 
             if ptype not in ["customer", "supplier", "both"]:
                 raise ValueError(
-                    f"Invalid partner type '{ptype}'. Must be 'customer', 'supplier', or 'both'."
+                    f"Invalid partner type '{ptype}'. "
+                    "Must be 'customer', 'supplier', or 'both'."
                 )
 
             # Check if partner already exists for this tenant
@@ -96,7 +99,8 @@ class MigrationService:
     ) -> list[BankTransaction]:
         """
         Parses a simplified OFX bank statement file and stores the transaction records.
-        Expected fields inside <STMTTRN>: <DTPOSTED>, <TRNAMT>, <FITID>, <MEMO> or <NAME>
+        Expected fields inside <STMTTRN>: <DTPOSTED>, <TRNAMT>, <FITID>,
+        <MEMO> or <NAME>
         FITID is used to prevent duplicate imports per tenant.
         """
         if not ofx_content.strip():

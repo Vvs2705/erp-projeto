@@ -60,12 +60,10 @@ ignore = ["N818"]
 "tests/**" = ["S101", "S105", "S106", "E402", "E501", "ARG001", "ARG002", "ERA001"]
 # Alembic migrations are generated/large and not held to app line limits.
 "migrations/**" = ["E501", "E402", "F401"]
-# Legacy service modules predate the strict line-length bar; they are scheduled
-# for rework in Phase B (contabilidade) and carry a temporary E501 exemption.
-# New code (app/core, app/services/auth_service, routers/auth) stays fully strict.
+# Legacy services pendentes: quebra de linhas longas (E501) e o parâmetro de
+# interface organization_id (ARG004). Removidos conforme cada módulo é reescrito.
 "app/services/finance_service.py" = ["E501"]
 "app/services/inventory_service.py" = ["E501", "ARG004"]
-"app/services/migration_service.py" = ["E501"]
 "app/services/purchase_service.py" = ["E501"]
 "app/services/reporting_service.py" = ["E501"]
 "app/services/sales_service.py" = ["E501"]
@@ -98,8 +96,7 @@ disallow_incomplete_defs = false
 disallow_any_generics = false
 check_untyped_defs = false
 
-# Legacy services predate strict typing (any-generics on dict returns); hardened
-# module-by-module. New code remains under full strict typing.
+# Legacy services with untyped dict returns (any-generics); hardened when rewritten.
 [[tool.mypy.overrides]]
 module = [
     "app.services.sales_service",
