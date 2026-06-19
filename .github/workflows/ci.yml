@@ -112,14 +112,68 @@ jobs:
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: poetry install --no-interaction --no-root
 
-      - name: pytest
-        run: poetry run pytest --tb=short -q
+      - name: pytest (unitários)
+        run: poetry run pytest -m "not integration" --tb=short -q
+
+  # ── Estágio 3b: integração (Postgres real: RLS + triggers) ───────────────────
+  integration:
+    name: Integration (Postgres)
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: erp_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d erp_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/erp_test
+      TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/erp_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: snok/install-poetry@v1
+        with:
+          version: 1.8.3
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache venv
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: backend/.venv
+          key: venv-${{ runner.os }}-py312-${{ hashFiles('backend/poetry.lock') }}
+          restore-keys: venv-${{ runner.os }}-py312-
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Aplica migrações (cria schema + RLS + triggers)
+        run: poetry run alembic upgrade head
+
+      - name: Testes de integração (RLS + imutabilidade)
+        run: poetry run pytest -m integration --tb=short -q
 
   # ── Estágio 4: build ─────────────────────────────────────────────────────────
   build:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: [type-check, test]
+    needs: [type-check, test, integration]
     # Sem working-directory override — o contexto Docker é o root do repo
 
     steps:
