@@ -1,92 +1,117 @@
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, status
-from fiscal_engine.calculations import TaxEngine
-from fiscal_engine.certificates import MockCertificateSigner
-from fiscal_engine.nfe import generate_nfe_xml
-from fiscal_engine.nfse import generate_nfse_xml
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
+from fiscal_engine.determination import Operation, Regime, determine
+from fiscal_engine.emission import EmissionRequest, Item, Party
+from pydantic import BaseModel, Field
 
-router = APIRouter(prefix="/api/v1/fiscal", tags=["Fiscal Engine"])
+from app.core.security import Principal, require_permission
+from app.services.fiscal_emission import (
+    EmissionError,
+    EmissionNotConfigured,
+    FiscalEmissionClient,
+)
+
+router = APIRouter(prefix="/api/v1/fiscal", tags=["Fiscal"])
+
+_REGIMES = {r.value: r for r in Regime}
+_OPERATIONS = {o.value: o for o in Operation}
 
 
 class TaxCalculationRequest(BaseModel):
-    amount: Decimal
+    amount: Decimal = Field(gt=0)
     issue_date: date
     is_service: bool = False
+    regime: str = Regime.PRESUMIDO.value
 
 
-class XmlGenerationRequest(BaseModel):
-    tx_id: str
-    number: str
+class EmitItem(BaseModel):
+    code: str
+    description: str
+    ncm: str
+    cfop: str
+    quantity: Decimal = Field(gt=0)
+    unit_value: Decimal = Field(gt=0)
+
+
+class EmitRequest(BaseModel):
     issuer_cnpj: str
-    dest_cnpj: str
-    amount: Decimal
+    issuer_name: str
+    recipient_cnpj: str
+    recipient_name: str
     issue_date: date
-    is_service: bool = False
-    pfx_password: str = "secret123"
+    nature: str
+    operation: str = Operation.SALE_GOODS.value
+    regime: str = Regime.PRESUMIDO.value
+    items: list[EmitItem] = Field(min_length=1)
 
 
-@router.post("/calculate", status_code=status.HTTP_200_OK)
-async def calculate_taxes(payload: TaxCalculationRequest):
-    """
-    Computes Brazilian taxes for a given amount and emission date.
-    Calculates CBS and IBS if issue_date is >= 2026-01-01.
-    """
-    try:
-        return TaxEngine.calculate_taxes(
-            amount=payload.amount,
-            issue_date=payload.issue_date,
-            is_service=payload.is_service,
+@router.post("/calculate")
+async def calculate_taxes(
+    payload: TaxCalculationRequest,
+    _: Principal = Depends(require_permission("fiscal.read")),
+) -> dict[str, str]:
+    """Determina os tributos pela vigência da data de emissão (não emite nada)."""
+    regime = _REGIMES.get(payload.regime)
+    if regime is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Regime inválido: {payload.regime}",
         )
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    operation = Operation.SALE_SERVICE if payload.is_service else Operation.SALE_GOODS
+    result = determine(payload.amount, payload.issue_date, operation, regime)
+    return {tax: str(value) for tax, value in result.as_dict().items()}
 
 
-@router.post("/generate-xml", status_code=status.HTTP_200_OK)
-async def generate_and_sign_xml(payload: XmlGenerationRequest):
-    """
-    Generates and digitally signs the NF-e or NFS-e XML.
-    """
-    try:
-        # Calculate taxes
-        taxes = TaxEngine.calculate_taxes(
-            amount=payload.amount,
-            issue_date=payload.issue_date,
-            is_service=payload.is_service,
+@router.post("/emit", status_code=status.HTTP_201_CREATED)
+async def emit_document(
+    payload: EmitRequest,
+    _: Principal = Depends(require_permission("fiscal.document.issue")),
+) -> dict[str, object]:
+    """Emite um DF-e via provedor (determinação local + transmissão delegada)."""
+    operation = _OPERATIONS.get(payload.operation)
+    regime = _REGIMES.get(payload.regime)
+    if operation is None or regime is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Operação ou regime inválido.",
         )
 
-        # Generate XML structure
-        if payload.is_service:
-            xml_str = generate_nfse_xml(
-                tx_id=payload.tx_id,
-                number=payload.number,
-                issuer_cnpj=payload.issuer_cnpj,
-                dest_cnpj=payload.dest_cnpj,
-                amount=payload.amount,
-                taxes=taxes,
-                issue_date=payload.issue_date,
+    request = EmissionRequest(
+        issuer=Party(cnpj=payload.issuer_cnpj, name=payload.issuer_name),
+        recipient=Party(cnpj=payload.recipient_cnpj, name=payload.recipient_name),
+        operation=operation,
+        issue_date=payload.issue_date,
+        nature=payload.nature,
+        items=tuple(
+            Item(
+                code=item.code,
+                description=item.description,
+                ncm=item.ncm,
+                cfop=item.cfop,
+                quantity=item.quantity,
+                unit_value=item.unit_value,
             )
-            tag_to_sign = "InfDeclaracaoPrestacaoServico"
-        else:
-            xml_str = generate_nfe_xml(
-                tx_id=payload.tx_id,
-                number=payload.number,
-                issuer_cnpj=payload.issuer_cnpj,
-                dest_cnpj=payload.dest_cnpj,
-                amount=payload.amount,
-                taxes=taxes,
-                issue_date=payload.issue_date,
-            )
-            tag_to_sign = "infNFe"
+            for item in payload.items
+        ),
+    )
 
-        # Sign XML using the MockCertificateSigner
-        signer = MockCertificateSigner(
-            pfx_data=b"MOCK_PFX_BYTES_ERP", password=payload.pfx_password
-        )
-        signed_xml = signer.sign_xml(xml_str, tag_to_sign=tag_to_sign)
+    client = FiscalEmissionClient()
+    try:
+        result = await client.emit(request, regime)
+    except EmissionNotConfigured as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except EmissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
 
-        return {"xml": signed_xml, "taxes": taxes}
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {
+        "provider": result.provider,
+        "status": result.status,
+        "protocol": result.protocol,
+        "access_key": result.access_key,
+    }

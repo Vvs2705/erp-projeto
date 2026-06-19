@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
     OTEL_ENABLED: bool = False
 
+    # Fiscal — provedor de transmissão DF-e (assinatura ICP-Brasil + SEFAZ
+    # delegados a um provedor, ex.: Focus NFe). Sem isto, a emissão é recusada
+    # com erro claro (nunca saída fictícia).
+    FISCAL_PROVIDER_URL: str | None = None
+    FISCAL_PROVIDER_TOKEN: str | None = None
+
     # CORS (comma-separated origins)
     CORS_ORIGINS: str = "http://localhost:3000"
 

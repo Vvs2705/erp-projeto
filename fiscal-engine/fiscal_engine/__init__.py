@@ -1,25 +1,35 @@
 from .calculations import TaxEngine
-from .certificates import MockCertificateSigner
 from .determination import (
     Operation,
     RateSet,
     Regime,
+    TaxLine,
     TaxResult,
     determine,
     select_rate_set,
 )
-from .nfe import generate_nfe_xml
-from .nfse import generate_nfse_xml
+from .emission import (
+    EmissionRequest,
+    EmissionResult,
+    Item,
+    Party,
+    build_provider_payload,
+    total_amount,
+)
 
 __all__ = [
-    "MockCertificateSigner",
+    "EmissionRequest",
+    "EmissionResult",
+    "Item",
     "Operation",
+    "Party",
     "RateSet",
     "Regime",
     "TaxEngine",
+    "TaxLine",
     "TaxResult",
+    "build_provider_payload",
     "determine",
-    "generate_nfe_xml",
-    "generate_nfse_xml",
     "select_rate_set",
+    "total_amount",
 ]
