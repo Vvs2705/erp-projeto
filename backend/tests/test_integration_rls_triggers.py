@@ -83,7 +83,9 @@ async def _rls_isolation() -> None:
         app = await _connect_app()
         try:
             # Tenant A vê apenas o seu papel.
-            await app.execute("SELECT set_config('app.current_tenant_id', $1, false)", str(t_a))
+            await app.execute(
+                "SELECT set_config('app.current_tenant_id', $1, false)", str(t_a)
+            )
             visible = {
                 row["id"]
                 for row in await app.fetch(
@@ -93,7 +95,9 @@ async def _rls_isolation() -> None:
             assert visible == {r_a}, f"vazou entre tenants: {visible}"
 
             # Tenant B vê apenas o seu papel.
-            await app.execute("SELECT set_config('app.current_tenant_id', $1, false)", str(t_b))
+            await app.execute(
+                "SELECT set_config('app.current_tenant_id', $1, false)", str(t_b)
+            )
             visible_b = {
                 row["id"]
                 for row in await app.fetch(
