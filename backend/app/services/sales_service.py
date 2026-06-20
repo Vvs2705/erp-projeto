@@ -128,17 +128,25 @@ class SalesService:
         stock_account_id: uuid.UUID | None = None,
         ar_account_id: uuid.UUID | None = None,
         revenue_account_id: uuid.UUID | None = None,
+        lots: dict[uuid.UUID, str] | None = None,
+        serials: dict[uuid.UUID, list[str]] | None = None,
     ) -> Invoice:
         """
         Processes dispatch of SO items:
         1. Updates quantity_dispatched on SalesOrderItem.
         2. Calls register_stock_move(move_type='out') for each item, retrieving
-           its MPM value.
+           its cost (MPM, PEPS/FIFO por lote, ou identificação específica).
         3. Generates CMV JournalEntry: Debit CMV Account (Expense) and Credit
            Stock Account (Asset).
         4. Creates an Invoice (Contas a Receber) for the sales revenue.
         5. Generates Sales JournalEntry: Debit AR Account (Asset) and Credit
            Revenue Account (Revenue).
+
+        Para produtos rastreados, informe a camada de custo da saída:
+        - ``lots[product_id]`` = número do lote a baixar (produtos
+          ``tracking_mode='lot'``); se omitido, baixa por PEPS/FIFO;
+        - ``serials[product_id]`` = lista de números de série a baixar, uma por
+          unidade despachada (produtos ``tracking_mode='serial'``).
         """
         # Fetch Sales Order
         so_stmt = select(SalesOrder).where(
@@ -206,7 +214,12 @@ class SalesService:
             matched_item.quantity_dispatched += qty_dec
             total_sales_revenue += qty_dec * matched_item.unit_price
 
-            # Call register_stock_move (out). It calculates average cost automatically.
+            # Camada de custo (rastreamento por lote/série), quando informada.
+            lot_number = (lots or {}).get(prod_id)
+            serial_list = (serials or {}).get(prod_id)
+
+            # Call register_stock_move (out). O custo é apurado pelo método do
+            # produto (MPM, PEPS/FIFO por lote, ou identificação específica).
             stock_move = await InventoryService.register_stock_move(
                 db=db,
                 tenant_id=tenant_id,
@@ -216,6 +229,8 @@ class SalesService:
                 quantity=qty_dec,
                 unit_cost=Decimal("0.0000"),
                 reference=f"SO-DISP-{invoice_number}",
+                lot_number=lot_number,
+                serial_numbers=serial_list,
             )
             # Accumulate the actual MPM cost
             total_cmv_value += stock_move.total_cost

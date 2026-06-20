@@ -125,6 +125,8 @@ class PurchaseService:
         journal_id: uuid.UUID | None = None,
         stock_account_id: uuid.UUID | None = None,
         ap_account_id: uuid.UUID | None = None,
+        lots: dict[uuid.UUID, dict[str, Any]] | None = None,
+        serials: dict[uuid.UUID, list[str]] | None = None,
     ) -> Bill:
         """
         Processes receipt of PO items:
@@ -133,6 +135,12 @@ class PurchaseService:
         3. Creates a Bill (Contas a Pagar) for the received items value.
         4. Posts JournalEntry: Debit Stock Account (Asset) and Credit AP Account
            (Liability).
+
+        Para produtos rastreados, informe a camada de custo da entrada:
+        - ``lots[product_id]`` = ``{"lot_number": str, "expiry_date": date|None}``
+          (produtos com ``tracking_mode='lot'``);
+        - ``serials[product_id]`` = lista de números de série, uma por unidade
+          recebida (produtos com ``tracking_mode='serial'``).
         """
         # Fetch the Purchase Order with items
         po_stmt = select(PurchaseOrder).where(
@@ -201,6 +209,10 @@ class PurchaseService:
             matched_item.quantity_received += qty_dec
             total_received_value += qty_dec * matched_item.unit_cost
 
+            # Camada de custo (rastreamento por lote/série), quando informada.
+            lot_info = (lots or {}).get(prod_id)
+            serial_list = (serials or {}).get(prod_id)
+
             # Call register_stock_move
             await InventoryService.register_stock_move(
                 db=db,
@@ -211,6 +223,9 @@ class PurchaseService:
                 quantity=qty_dec,
                 unit_cost=matched_item.unit_cost,
                 reference=f"PO-REC-{invoice_number}",
+                lot_number=lot_info.get("lot_number") if lot_info else None,
+                expiry_date=lot_info.get("expiry_date") if lot_info else None,
+                serial_numbers=serial_list,
             )
 
         if total_received_value <= Decimal("0.0000"):
