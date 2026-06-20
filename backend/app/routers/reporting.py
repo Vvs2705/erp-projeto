@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_tenant_and_user
+from app.services.analytics_service import AnalyticsService
 from app.services.reporting_service import ReportingService
 
 router = APIRouter(prefix="/api/v1/reporting", tags=["Reporting"])
@@ -82,6 +83,58 @@ async def get_ageing(
         return await ReportingService.get_ageing_report(
             db, tenant_id, ageing_type_upper, reference_date
         )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
+
+
+@router.get("/cash-flow")
+async def get_cash_flow(
+    start_date: date = Query(..., description="Start date of the period"),
+    end_date: date = Query(..., description="End date of the period"),
+    db: AsyncSession = Depends(get_db),
+    tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
+) -> dict[str, Any]:
+    tenant_id, _ = tenant_and_user
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date cannot be before start_date",
+        )
+    try:
+        return await AnalyticsService.get_cash_flow(db, tenant_id, start_date, end_date)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        ) from e
+
+
+@router.get("/kpis")
+async def get_financial_kpis(
+    start_date: date = Query(..., description="Start date of the period"),
+    end_date: date = Query(..., description="End date of the period"),
+    db: AsyncSession = Depends(get_db),
+    tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
+) -> dict[str, Any]:
+    tenant_id, _ = tenant_and_user
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date cannot be before start_date",
+        )
+    try:
+        return await AnalyticsService.get_financial_kpis(
+            db, tenant_id, start_date, end_date
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
