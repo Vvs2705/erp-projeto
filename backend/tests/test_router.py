@@ -306,3 +306,31 @@ def test_reconciliation_auto_endpoint(mock_recon_service):
     assert response.json()["auto_reconciled"] == 2
 
     app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.migration.NFeImportService")
+def test_import_nfe_xml_endpoint(mock_nfe_service):
+    mock_nfe_service.parse = MagicMock(
+        return_value={"access_key": "x", "number": "123", "items": []}
+    )
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    response = client.post(
+        "/api/v1/migration/nfe/xml",
+        json={"xml_content": "<nfeProc/>"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["nfe"]["number"] == "123"
+
+
+@patch("app.routers.migration.NFeImportService")
+def test_import_nfe_xml_endpoint_invalid(mock_nfe_service):
+    mock_nfe_service.parse = MagicMock(side_effect=ValueError("XML malformado"))
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    response = client.post(
+        "/api/v1/migration/nfe/xml",
+        json={"xml_content": "lixo"},
+        headers=headers,
+    )
+    assert response.status_code == 400
