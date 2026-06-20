@@ -214,3 +214,95 @@ def test_kpis_endpoint(mock_analytics_service):
     assert response.json()["result"]["net_margin"] == "0.6250"
 
     app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.finance.ReconciliationService")
+def test_reconciliation_suggestions_endpoint(mock_recon_service):
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    mock_recon_service.suggest_matches = AsyncMock(
+        return_value=[
+            {
+                "bank_transaction": {"id": str(uuid.uuid4()), "amount": "1000.0000"},
+                "candidates": [],
+            }
+        ]
+    )
+
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    response = client.get(
+        "/api/v1/finance/reconciliation/suggestions",
+        params={"start_date": "2026-06-01", "end_date": "2026-06-30"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert len(response.json()["suggestions"]) == 1
+
+    app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.finance.ReconciliationService")
+def test_reconciliation_confirm_endpoint(mock_recon_service):
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    bt_id = uuid.uuid4()
+    pay_id = uuid.uuid4()
+    mock_bt = MagicMock()
+    mock_bt.id = bt_id
+    mock_bt.matched_kind = "invoice_payment"
+    mock_bt.matched_payment_id = pay_id
+    mock_recon_service.confirm_match = AsyncMock(return_value=mock_bt)
+
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    payload = {
+        "bank_transaction_id": str(bt_id),
+        "kind": "invoice_payment",
+        "payment_id": str(pay_id),
+    }
+    response = client.post(
+        "/api/v1/finance/reconciliation/confirm", json=payload, headers=headers
+    )
+    assert response.status_code == 200
+    assert response.json()["reconciled"] is True
+    assert response.json()["matched_kind"] == "invoice_payment"
+
+    app.dependency_overrides.pop(get_db, None)
+
+
+def test_reconciliation_confirm_rejects_invalid_kind():
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    payload = {
+        "bank_transaction_id": str(uuid.uuid4()),
+        "kind": "nonsense",
+        "payment_id": str(uuid.uuid4()),
+    }
+    response = client.post(
+        "/api/v1/finance/reconciliation/confirm", json=payload, headers=headers
+    )
+    # Pydantic pattern validation rejects the bad 'kind'.
+    assert response.status_code == 422
+    app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.finance.ReconciliationService")
+def test_reconciliation_auto_endpoint(mock_recon_service):
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    mock_recon_service.auto_reconcile = AsyncMock(
+        return_value={"unreconciled": 3, "auto_reconciled": 2, "pending": 1}
+    )
+
+    headers = {"X-Tenant-ID": str(mock_tenant_id)}
+    response = client.post(
+        "/api/v1/finance/reconciliation/auto",
+        params={"start_date": "2026-06-01", "end_date": "2026-06-30"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["auto_reconciled"] == 2
+
+    app.dependency_overrides.pop(get_db, None)

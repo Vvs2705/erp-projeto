@@ -449,6 +449,11 @@ class BankTransaction(Base):
         UniqueConstraint(
             "tenant_id", "fitid", name="uq_bank_transactions_fitid_tenant"
         ),
+        CheckConstraint(
+            "matched_kind IS NULL OR "
+            "matched_kind IN ('invoice_payment', 'bill_payment')",
+            name="chk_bank_transactions_matched_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -462,6 +467,12 @@ class BankTransaction(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     description: Mapped[str] = mapped_column(String(255), nullable=False)
     reconciled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Conciliação: liga a linha do extrato a um pagamento contabilizado (1:1).
+    # ``matched_kind`` discrimina a tabela de origem do ``matched_payment_id``.
+    matched_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    matched_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )

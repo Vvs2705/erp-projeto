@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,10 @@ from app.services.finance_service import (
     InvoiceNotFoundException,
     JournalNotFoundException,
     OverpaymentException,
+)
+from app.services.reconciliation_service import (
+    ReconciliationException,
+    ReconciliationService,
 )
 
 router = APIRouter(prefix="/api/v1/finance", tags=["Finance"])
@@ -111,6 +115,12 @@ class BankReconcileRequest(BaseModel):
     journal_entry_id: uuid.UUID
     statement_date: date
     statement_amount: Decimal = Field(..., gt=0, decimal_places=4)
+
+
+class ConfirmMatchRequest(BaseModel):
+    bank_transaction_id: uuid.UUID
+    kind: str = Field(..., pattern="^(invoice_payment|bill_payment)$")
+    payment_id: uuid.UUID
 
 
 # --- Endpoints ---
@@ -446,3 +456,76 @@ async def reconcile_bank_transaction(
             ),
         )
     return {"reconciled": True, "journal_entry_id": payload.journal_entry_id}
+
+
+@router.get("/reconciliation/suggestions")
+async def reconciliation_suggestions(
+    start_date: date = Query(..., description="Início do período do extrato"),
+    end_date: date = Query(..., description="Fim do período do extrato"),
+    date_tolerance_days: int = Query(
+        3, ge=0, description="Janela de dias para casar a data do pagamento"
+    ),
+    db: AsyncSession = Depends(get_db),
+    tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
+) -> dict[str, Any]:
+    tenant_id, _ = tenant_and_user
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date cannot be before start_date",
+        )
+    await set_session_tenant(db, tenant_id)
+    suggestions = await ReconciliationService.suggest_matches(
+        db, tenant_id, start_date, end_date, date_tolerance_days
+    )
+    return {"suggestions": suggestions}
+
+
+@router.post("/reconciliation/confirm")
+async def reconciliation_confirm(
+    payload: ConfirmMatchRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
+) -> dict[str, Any]:
+    tenant_id, _ = tenant_and_user
+    await set_session_tenant(db, tenant_id)
+    try:
+        bt = await ReconciliationService.confirm_match(
+            db,
+            tenant_id,
+            payload.bank_transaction_id,
+            payload.kind,
+            payload.payment_id,
+        )
+    except ReconciliationException as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    return {
+        "reconciled": True,
+        "bank_transaction_id": bt.id,
+        "matched_kind": bt.matched_kind,
+        "matched_payment_id": bt.matched_payment_id,
+    }
+
+
+@router.post("/reconciliation/auto")
+async def reconciliation_auto(
+    start_date: date = Query(..., description="Início do período do extrato"),
+    end_date: date = Query(..., description="Fim do período do extrato"),
+    date_tolerance_days: int = Query(
+        3, ge=0, description="Janela de dias para casar a data do pagamento"
+    ),
+    db: AsyncSession = Depends(get_db),
+    tenant_and_user: tuple[uuid.UUID, uuid.UUID] = Depends(get_current_tenant_and_user),
+) -> dict[str, Any]:
+    tenant_id, _ = tenant_and_user
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date cannot be before start_date",
+        )
+    await set_session_tenant(db, tenant_id)
+    return await ReconciliationService.auto_reconcile(
+        db, tenant_id, start_date, end_date, date_tolerance_days
+    )
