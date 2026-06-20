@@ -446,3 +446,214 @@ async def test_sales_order_dispatch_posting_rules(
     assert sales_debit.amount == Decimal("600.0000")  # 4 * 150
     assert sales_credit.account_id == revenue_acc.id
     assert sales_credit.amount == Decimal("600.0000")
+
+
+async def _seed_tracked_product(
+    db: AsyncSession, tenant_id, sku: str, tracking_mode: str
+) -> Product:
+    product = Product(
+        tenant_id=tenant_id,
+        sku=sku,
+        name=f"Tracked {tracking_mode}",
+        unit_of_measure="UN",
+        tracking_mode=tracking_mode,
+    )
+    db.add(product)
+    await db.flush()
+    return product
+
+
+@pytest.mark.asyncio
+async def test_p2p_o2c_serial_end_to_end(db_session: AsyncSession, seed_data: dict):
+    """Compra (3 séries) e venda (2 séries específicas): o CMV é o custo exato."""
+    tenant = seed_data["tenant"]
+    org = seed_data["org"]
+    le = seed_data["le"]
+    journal = seed_data["journal"]
+    stock_acc = seed_data["stock_acc"]
+    ap_acc = seed_data["ap_acc"]
+    ar_acc = seed_data["ar_acc"]
+    revenue_acc = seed_data["revenue_acc"]
+    cmv_acc = seed_data["cmv_acc"]
+
+    product = await _seed_tracked_product(
+        db_session, tenant.id, "SKU-SERIAL-001", "serial"
+    )
+
+    # P2P: recebe 3 unidades @ 500 com séries A, B, C.
+    po = await PurchaseService.create_purchase_order(
+        db=db_session,
+        tenant_id=tenant.id,
+        provider_name="Fornecedor Serial",
+        cnpj="11222333000144",
+        items=[
+            {
+                "product_id": product.id,
+                "quantity": Decimal("3.0000"),
+                "unit_cost": Decimal("500.0000"),
+            }
+        ],
+    )
+    po = await PurchaseService.approve_purchase_order(db_session, tenant.id, po.id)
+    await PurchaseService.receive_purchase_order_items(
+        db=db_session,
+        tenant_id=tenant.id,
+        purchase_order_id=po.id,
+        items_received={product.id: Decimal("3.0000")},
+        invoice_number="NF-PUR-SER",
+        organization_id=org.id,
+        legal_entity_id=le.id,
+        journal_id=journal.id,
+        stock_account_id=stock_acc.id,
+        ap_account_id=ap_acc.id,
+        serials={product.id: ["A", "B", "C"]},
+    )
+
+    # O2C: despacha 2 unidades, escolhendo as séries A e C.
+    so = await SalesService.create_sales_order(
+        db=db_session,
+        tenant_id=tenant.id,
+        customer_name="Cliente Serial",
+        cnpj="55666777000122",
+        items=[
+            {
+                "product_id": product.id,
+                "quantity": Decimal("2.0000"),
+                "unit_price": Decimal("900.0000"),
+            }
+        ],
+    )
+    so = await SalesService.approve_sales_order(db_session, tenant.id, so.id)
+    invoice = await SalesService.dispatch_sales_order_items(
+        db=db_session,
+        tenant_id=tenant.id,
+        sales_order_id=so.id,
+        items_dispatched={product.id: Decimal("2.0000")},
+        invoice_number="NF-SLS-SER",
+        organization_id=org.id,
+        legal_entity_id=le.id,
+        journal_id=journal.id,
+        cmv_account_id=cmv_acc.id,
+        stock_account_id=stock_acc.id,
+        ar_account_id=ar_acc.id,
+        revenue_account_id=revenue_acc.id,
+        serials={product.id: ["A", "C"]},
+    )
+
+    assert invoice.amount == Decimal("1800.0000")  # 2 * 900
+
+    # CMV = custo das séries A e C (500 + 500 = 1000), identificação específica.
+    stmt = (
+        select(JournalEntry)
+        .where(JournalEntry.tenant_id == tenant.id)
+        .options(selectinload(JournalEntry.lines))
+    )
+    entries = (await db_session.execute(stmt)).scalars().all()
+    cmv_je = next(e for e in entries if "CMV" in e.description)
+    cmv_debit = next(line for line in cmv_je.lines if line.direction == "DEBIT")
+    assert cmv_debit.account_id == cmv_acc.id
+    assert cmv_debit.amount == Decimal("1000.0000")
+
+    # B continua em estoque; sobra 1 unidade @ 500.
+    val = await InventoryService.get_or_create_valuation(
+        db_session, tenant.id, product.id
+    )
+    assert val.qty_on_hand == Decimal("1.0000")
+    assert val.total_value == Decimal("500.0000")
+
+
+@pytest.mark.asyncio
+async def test_p2p_o2c_lot_fifo_end_to_end(db_session: AsyncSession, seed_data: dict):
+    """Duas entradas em lotes distintos e uma saída por PEPS/FIFO no CMV."""
+    tenant = seed_data["tenant"]
+    org = seed_data["org"]
+    le = seed_data["le"]
+    journal = seed_data["journal"]
+    stock_acc = seed_data["stock_acc"]
+    ap_acc = seed_data["ap_acc"]
+    ar_acc = seed_data["ar_acc"]
+    revenue_acc = seed_data["revenue_acc"]
+    cmv_acc = seed_data["cmv_acc"]
+
+    product = await _seed_tracked_product(db_session, tenant.id, "SKU-LOTE-001", "lot")
+
+    async def _receive_lot(lot_number: str, unit_cost: str) -> None:
+        po = await PurchaseService.create_purchase_order(
+            db=db_session,
+            tenant_id=tenant.id,
+            provider_name="Fornecedor Lote",
+            cnpj="11222333000144",
+            items=[
+                {
+                    "product_id": product.id,
+                    "quantity": Decimal("10.0000"),
+                    "unit_cost": Decimal(unit_cost),
+                }
+            ],
+        )
+        po = await PurchaseService.approve_purchase_order(db_session, tenant.id, po.id)
+        await PurchaseService.receive_purchase_order_items(
+            db=db_session,
+            tenant_id=tenant.id,
+            purchase_order_id=po.id,
+            items_received={product.id: Decimal("10.0000")},
+            invoice_number=f"NF-PUR-{lot_number}",
+            organization_id=org.id,
+            legal_entity_id=le.id,
+            journal_id=journal.id,
+            stock_account_id=stock_acc.id,
+            ap_account_id=ap_acc.id,
+            lots={product.id: {"lot_number": lot_number, "expiry_date": None}},
+        )
+
+    await _receive_lot("L1", "100.0000")  # entra primeiro
+    await _receive_lot("L2", "130.0000")  # entra depois
+
+    # O2C: despacha 15 sem indicar lote -> FIFO (10 de L1 + 5 de L2).
+    so = await SalesService.create_sales_order(
+        db=db_session,
+        tenant_id=tenant.id,
+        customer_name="Cliente Lote",
+        cnpj="55666777000122",
+        items=[
+            {
+                "product_id": product.id,
+                "quantity": Decimal("15.0000"),
+                "unit_price": Decimal("200.0000"),
+            }
+        ],
+    )
+    so = await SalesService.approve_sales_order(db_session, tenant.id, so.id)
+    invoice = await SalesService.dispatch_sales_order_items(
+        db=db_session,
+        tenant_id=tenant.id,
+        sales_order_id=so.id,
+        items_dispatched={product.id: Decimal("15.0000")},
+        invoice_number="NF-SLS-LOTE",
+        organization_id=org.id,
+        legal_entity_id=le.id,
+        journal_id=journal.id,
+        cmv_account_id=cmv_acc.id,
+        stock_account_id=stock_acc.id,
+        ar_account_id=ar_acc.id,
+        revenue_account_id=revenue_acc.id,
+    )
+
+    assert invoice.amount == Decimal("3000.0000")  # 15 * 200
+
+    stmt = (
+        select(JournalEntry)
+        .where(JournalEntry.tenant_id == tenant.id)
+        .options(selectinload(JournalEntry.lines))
+    )
+    entries = (await db_session.execute(stmt)).scalars().all()
+    cmv_je = next(e for e in entries if "CMV" in e.description)
+    cmv_debit = next(line for line in cmv_je.lines if line.direction == "DEBIT")
+    # FIFO: 10*100 + 5*130 = 1650 (não o custo médio 1725 de 15*115).
+    assert cmv_debit.amount == Decimal("1650.0000")
+
+    val = await InventoryService.get_or_create_valuation(
+        db_session, tenant.id, product.id
+    )
+    assert val.qty_on_hand == Decimal("5.0000")
+    assert val.total_value == Decimal("650.0000")  # restam 5 de L2 @ 130
