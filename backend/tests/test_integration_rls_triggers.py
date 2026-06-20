@@ -243,6 +243,108 @@ async def _rls_fiscal_document_taxes() -> None:
         await su.close()
 
 
+async def _rls_stock_lots_serials() -> None:
+    su = await asyncpg.connect(dsn=PG_DSN)
+    t_a, t_b = uuid.uuid4(), uuid.uuid4()
+    p_a, p_b = uuid.uuid4(), uuid.uuid4()
+    lot_a, lot_b = uuid.uuid4(), uuid.uuid4()
+    ser_a, ser_b = uuid.uuid4(), uuid.uuid4()
+    try:
+        await _ensure_app_role(su)
+        await su.execute(
+            "INSERT INTO tenants(id,name,slug,status,subscription_price,billing_limit,"
+            "created_at,updated_at) VALUES "
+            "($1,'A',$2,'active',0,0,now(),now()),($3,'B',$4,'active',0,0,now(),now())",
+            t_a,
+            f"lot-a-{t_a}",
+            t_b,
+            f"lot-b-{t_b}",
+        )
+        await su.execute(
+            "INSERT INTO products(id,tenant_id,sku,name,unit_of_measure,tracking_mode,"
+            "created_at,updated_at) VALUES "
+            "($1,$2,'SKU-A','PA','UN','lot',now(),now()),"
+            "($3,$4,'SKU-B','PB','UN','serial',now(),now())",
+            p_a,
+            t_a,
+            p_b,
+            t_b,
+        )
+        await su.execute(
+            "INSERT INTO stock_lots(id,tenant_id,product_id,lot_number,qty_on_hand,"
+            "unit_cost,created_at) VALUES "
+            "($1,$2,$3,'L-A',10,100,now()),($4,$5,$6,'L-B',10,100,now())",
+            lot_a,
+            t_a,
+            p_a,
+            lot_b,
+            t_b,
+            p_b,
+        )
+        await su.execute(
+            "INSERT INTO stock_serials(id,tenant_id,product_id,serial_number,unit_cost,"
+            "status,created_at) VALUES "
+            "($1,$2,$3,'S-A',500,'in_stock',now()),"
+            "($4,$5,$6,'S-B',500,'in_stock',now())",
+            ser_a,
+            t_a,
+            p_a,
+            ser_b,
+            t_b,
+            p_b,
+        )
+
+        app = await _connect_app()
+        try:
+            # Tenant A enxerga apenas o próprio lote e a própria série.
+            await app.execute(
+                "SELECT set_config('app.current_tenant_id', $1, false)", str(t_a)
+            )
+            lots = {
+                row["id"]
+                for row in await app.fetch(
+                    "SELECT id FROM stock_lots WHERE id = ANY($1::uuid[])",
+                    [lot_a, lot_b],
+                )
+            }
+            assert lots == {lot_a}, f"lote vazou entre tenants: {lots}"
+            serials = {
+                row["id"]
+                for row in await app.fetch(
+                    "SELECT id FROM stock_serials WHERE id = ANY($1::uuid[])",
+                    [ser_a, ser_b],
+                )
+            }
+            assert serials == {ser_a}, f"série vazou entre tenants: {serials}"
+
+            # Sem tenant setado: deny by default em ambas as tabelas.
+            await app.execute("SELECT set_config('app.current_tenant_id', '', false)")
+            none_lots = await app.fetch(
+                "SELECT id FROM stock_lots WHERE id = ANY($1::uuid[])", [lot_a, lot_b]
+            )
+            none_serials = await app.fetch(
+                "SELECT id FROM stock_serials WHERE id = ANY($1::uuid[])",
+                [ser_a, ser_b],
+            )
+            assert none_lots == [], f"deveria negar lotes sem tenant: {none_lots}"
+            assert (
+                none_serials == []
+            ), f"deveria negar séries sem tenant: {none_serials}"
+        finally:
+            await app.close()
+    finally:
+        ids = [t_a, t_b]
+        await su.execute(
+            "DELETE FROM stock_lots WHERE tenant_id = ANY($1::uuid[])", ids
+        )
+        await su.execute(
+            "DELETE FROM stock_serials WHERE tenant_id = ANY($1::uuid[])", ids
+        )
+        await su.execute("DELETE FROM products WHERE tenant_id = ANY($1::uuid[])", ids)
+        await su.execute("DELETE FROM tenants WHERE id = ANY($1::uuid[])", ids)
+        await su.close()
+
+
 def _sqlalchemy_url() -> str:
     assert PG_DSN is not None
     return PG_DSN.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -372,6 +474,10 @@ def test_imutabilidade_de_lancamentos_postados() -> None:
 
 def test_rls_fiscal_document_taxes() -> None:
     _run(_rls_fiscal_document_taxes())
+
+
+def test_rls_stock_lots_serials() -> None:
+    _run(_rls_stock_lots_serials())
 
 
 def test_purge_tenant_remove_tudo() -> None:
