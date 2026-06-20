@@ -150,3 +150,67 @@ def test_create_bill_endpoint(mock_finance_service):
     assert response.json()["status"] == "pending"
 
     app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.reporting.AnalyticsService")
+def test_cash_flow_endpoint(mock_analytics_service):
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    mock_analytics_service.get_cash_flow = AsyncMock(
+        return_value={
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-30",
+            "operating": {
+                "receipts_from_customers": "8000.0000",
+                "payments_to_suppliers": "1000.0000",
+                "net_cash_from_operations": "7000.0000",
+            },
+            "by_method": {"inflows": {"PIX": "8000.0000"}, "outflows": {}},
+            "net_cash_flow": "7000.0000",
+        }
+    )
+
+    response = client.get(
+        "/api/v1/reporting/cash-flow",
+        params={"start_date": "2026-06-01", "end_date": "2026-06-30"},
+    )
+    assert response.status_code == 200
+    assert response.json()["net_cash_flow"] == "7000.0000"
+
+    app.dependency_overrides.pop(get_db, None)
+
+
+def test_cash_flow_endpoint_rejects_inverted_dates():
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    response = client.get(
+        "/api/v1/reporting/cash-flow",
+        params={"start_date": "2026-06-30", "end_date": "2026-06-01"},
+    )
+    assert response.status_code == 400
+    app.dependency_overrides.pop(get_db, None)
+
+
+@patch("app.routers.reporting.AnalyticsService")
+def test_kpis_endpoint(mock_analytics_service):
+    mock_db = AsyncMock()
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    mock_analytics_service.get_financial_kpis = AsyncMock(
+        return_value={
+            "period": {"start_date": "2026-06-01", "end_date": "2026-06-30"},
+            "result": {"net_margin": "0.6250"},
+            "position": {"debt_ratio": "0.1667"},
+            "returns": {"return_on_equity": "0.5000"},
+            "working_capital": {"net_working_capital": "5000.0000"},
+        }
+    )
+
+    response = client.get(
+        "/api/v1/reporting/kpis",
+        params={"start_date": "2026-06-01", "end_date": "2026-06-30"},
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["net_margin"] == "0.6250"
+
+    app.dependency_overrides.pop(get_db, None)
