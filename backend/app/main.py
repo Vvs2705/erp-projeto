@@ -86,6 +86,13 @@ async def auth_middleware(
     The tenant is derived from the validated token — never from a client-supplied
     header — and is set as a context variable consumed when DB sessions open.
     """
+    # CORS preflight requests carry no credentials by design and must be answered
+    # by the CORS middleware. This middleware runs ahead of it, so let OPTIONS
+    # pass through untouched — otherwise protected routes reject the preflight
+    # with 401 (no CORS headers) and browsers report a network failure.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     if _is_public(request.url.path):
         return await call_next(request)
 
