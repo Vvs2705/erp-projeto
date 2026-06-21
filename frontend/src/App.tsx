@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { useAuthStore } from './store/authStore'
-import { authApi, ApiError } from './lib/api'
+import { authApi, ApiError, reportingApi, fiscalApi } from './lib/api'
+import type { FiscalRegime, FiscalCalcResponse } from './lib/api'
 import {
   LayoutDashboard,
   FileSpreadsheet,
@@ -16,10 +18,22 @@ import {
   AlertTriangle,
   Menu,
   X,
-  CheckCircle2,
-  Clock,
-  ShieldCheck
+  Loader2,
+  Calculator,
+  Wallet,
+  RefreshCw
 } from 'lucide-react'
+
+// ─── Helpers de formatação (pt-BR) ───
+// O backend manda Decimal como string; coage com segurança.
+const num = (v: number | string | undefined | null): number => {
+  const n = typeof v === 'number' ? v : parseFloat(v ?? '')
+  return Number.isFinite(n) ? n : 0
+}
+const brl = (v: number | string) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(num(v))
+const pct = (ratio: number | string) => `${(num(ratio) * 100).toFixed(1)}%`
+const todayISO = () => new Date().toISOString().slice(0, 10)
 
 // Auth Guard to protect private pages
 function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -34,7 +48,7 @@ function Login() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  
+
   const login = useAuthStore((state) => state.login)
   const navigate = useNavigate()
 
@@ -168,10 +182,7 @@ function Login() {
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
+                  <Loader2 className="animate-spin h-5 w-5" />
                   Conectando...
                 </>
               ) : (
@@ -191,222 +202,326 @@ function Login() {
   )
 }
 
-// Mock Dashboard view
-function DashboardView() {
+function KpiCard({ title, value, icon: Icon, loading }: { title: string; value: string; icon: React.ComponentType<{ className?: string }>; loading: boolean }) {
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Olá, Bem-vindo de Volta</h2>
-        <p className="text-slate-400 text-sm">Resumo da saúde financeira e fiscal da sua organização.</p>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { title: 'Faturamento Bruto', value: 'R$ 142.384,90', icon: DollarSign, change: '+12.5%', isUp: true },
-          { title: 'Notas Fiscais Emitidas', value: '843', icon: FileSpreadsheet, change: '+8.2%', isUp: true },
-          { title: 'Impostos Retidos', value: 'R$ 28.490,11', icon: TrendingUp, change: '-2.1%', isUp: false },
-          { title: 'Clientes Ativos', value: '1.240', icon: Users, change: '+4.3%', isUp: true }
-        ].map((stat, idx) => (
-          <div key={idx} className="glass-panel p-5 rounded-xl border border-slate-800 flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{stat.title}</span>
-              <div className="p-2 rounded-lg bg-brand-950 border border-brand-900/50 text-brand-400">
-                <stat.icon className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-4">
-              <span className="text-2xl font-bold text-white">{stat.value}</span>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className={`text-xs font-semibold ${stat.isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {stat.change}
-                </span>
-                <span className="text-xs text-slate-500">vs. mês anterior</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Charts section mockup */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="glass-panel p-5 rounded-xl border border-slate-800 lg:col-span-2 flex flex-col justify-between">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-semibold text-white">Desempenho de Notas Fiscais</h3>
-            <span className="text-xs text-brand-400 hover:underline cursor-pointer">Exportar relatório</span>
-          </div>
-          
-          <div className="h-64 flex items-end gap-3 px-2 pt-4 border-b border-slate-800">
-            {[55, 78, 45, 90, 120, 95, 110, 130, 85, 140, 160, 180].map((h, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center group cursor-pointer h-full justify-end">
-                <div 
-                  style={{ height: `${(h / 180) * 100}%` }} 
-                  className="w-full bg-brand-500/30 hover:bg-brand-500 rounded-t transition-all relative"
-                >
-                  <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 transform -translate-x-1/2 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[10px] text-white whitespace-nowrap shadow-xl z-10">
-                    R$ {h}k
-                  </div>
-                </div>
-                <span className="text-[10px] text-slate-500 mt-2 select-none">M{i+1}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Status system details */}
-        <div className="glass-panel p-5 rounded-xl border border-slate-800 flex flex-col justify-between">
-          <div>
-            <h3 className="font-semibold text-white mb-4">Integração do Inquilino</h3>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded bg-emerald-950 text-emerald-400">
-                  <ShieldCheck className="h-4 w-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-white">Assinatura Ativa</h4>
-                  <p className="text-[10px] text-slate-400">Plano Enterprise com suporte prioritário</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded bg-brand-950 text-brand-400">
-                  <CheckCircle2 className="h-4 w-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-white">Módulo Fiscal (SPED/Reinf)</h4>
-                  <p className="text-[10px] text-slate-400">Sincronização com RFB em conformidade</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded bg-amber-950 text-amber-400">
-                  <Clock className="h-4 w-4" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-white">Último Backup Realizado</h4>
-                  <p className="text-[10px] text-slate-400">Hoje às 04:00 AM (AWS S3)</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 pt-4 border-t border-slate-900">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-500">Mapeamento de Rotas API</span>
-              <span className="font-mono text-slate-400 select-none">v1.2.4-stable</span>
-            </div>
-          </div>
+    <div className="glass-panel p-5 rounded-xl border border-slate-800 flex flex-col justify-between min-h-[116px]">
+      <div className="flex justify-between items-start">
+        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{title}</span>
+        <div className="p-2 rounded-lg bg-brand-950 border border-brand-900/50 text-brand-400">
+          <Icon className="h-4 w-4" />
         </div>
       </div>
-
-      {/* Recent Activity Table */}
-      <div className="glass-panel rounded-xl border border-slate-800 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-900 flex justify-between items-center">
-          <h3 className="font-semibold text-white">Últimas NF-e Emitidas</h3>
-          <button className="text-xs text-brand-400 hover:underline cursor-pointer">Ver todas</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-slate-900/50 text-slate-400 uppercase tracking-wider text-[10px] border-b border-slate-900">
-                <th className="px-5 py-3">Número/Série</th>
-                <th className="px-5 py-3">Destinatário</th>
-                <th className="px-5 py-3">Valor Total</th>
-                <th className="px-5 py-3">Data Emissão</th>
-                <th className="px-5 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-900">
-              {[
-                { nfe: '000.129.432 / S1', client: 'Alpha Tech Ltda', value: 'R$ 15.420,00', date: 'Hoje às 10:15', status: 'Autorizada', color: 'text-emerald-400 bg-emerald-950/45 border-emerald-800/40' },
-                { nfe: '000.129.431 / S1', client: 'Indústrias Premium SA', value: 'R$ 89.100,50', date: 'Ontem às 18:24', status: 'Autorizada', color: 'text-emerald-400 bg-emerald-950/45 border-emerald-800/40' },
-                { nfe: '000.129.430 / S1', client: 'Vortex Serviços de TI', value: 'R$ 4.290,00', date: '14 de Junho', status: 'Rejeitada', color: 'text-rose-400 bg-rose-950/45 border-rose-800/40' },
-                { nfe: '000.129.429 / S1', client: 'Mercado Confiança Ltda', value: 'R$ 1.250,00', date: '12 de Junho', status: 'Processando', color: 'text-amber-400 bg-amber-950/45 border-amber-800/40' },
-              ].map((row, idx) => (
-                <tr key={idx} className="hover:bg-slate-900/35 transition-colors">
-                  <td className="px-5 py-3.5 font-semibold text-white">{row.nfe}</td>
-                  <td className="px-5 py-3.5 text-slate-300">{row.client}</td>
-                  <td className="px-5 py-3.5 font-mono text-slate-300">{row.value}</td>
-                  <td className="px-5 py-3.5 text-slate-400">{row.date}</td>
-                  <td className="px-5 py-3.5">
-                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-medium ${row.color}`}>
-                      {row.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="mt-4">
+        {loading ? (
+          <div className="h-7 w-28 bg-slate-800/70 rounded animate-pulse" />
+        ) : (
+          <span className="text-2xl font-bold text-white">{value}</span>
+        )}
       </div>
     </div>
   )
 }
 
-// Invoices view skeleton
-function InvoicesView() {
+function PositionRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between border-b border-slate-900 pb-2">
+      <span className="text-slate-400">{label}</span>
+      <span className="text-white font-mono">{value}</span>
+    </div>
+  )
+}
+
+// Dashboard — KPIs e fluxo de caixa REAIS (backend /api/v1/reporting).
+function DashboardView() {
+  const year = useMemo(() => new Date().getFullYear(), [])
+  const startDate = `${year}-01-01`
+  const endDate = useMemo(() => todayISO(), [])
+
+  const kpis = useQuery({
+    queryKey: ['kpis', startDate, endDate],
+    queryFn: () => reportingApi.kpis(startDate, endDate),
+  })
+  const cash = useQuery({
+    queryKey: ['cashflow', startDate, endDate],
+    queryFn: () => reportingApi.cashFlow(startDate, endDate),
+  })
+
+  const loading = kpis.isLoading || cash.isLoading
+  const error = (kpis.error || cash.error) as Error | null
+  const emptyCash =
+    !loading &&
+    cash.data &&
+    num(cash.data.operating.receipts_from_customers) === 0 &&
+    num(cash.data.operating.payments_to_suppliers) === 0
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-white">Notas Fiscais de Produto & Serviço</h2>
-        <p className="text-slate-400 text-sm">Gerenciamento completo das NF-e, NFS-e e seus respectivos XMLs.</p>
-      </div>
-
-      <div className="glass-panel p-5 rounded-xl border border-slate-800 flex justify-between items-center">
-        <div className="flex gap-3">
-          <input 
-            type="text" 
-            placeholder="Pesquisar por número ou cliente..."
-            className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-brand-500 w-64"
-          />
-          <select className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none">
-            <option>Todos os status</option>
-            <option>Autorizada</option>
-            <option>Processando</option>
-            <option>Rejeitada</option>
-          </select>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Olá, Bem-vindo de Volta</h2>
+          <p className="text-slate-400 text-sm">
+            Indicadores reais do exercício {year} (1º jan — hoje), apurados do razão contábil.
+          </p>
         </div>
-
-        <button className="glow-btn bg-brand-500 text-white font-medium py-1.5 px-4 rounded-lg text-xs shadow-lg shadow-brand-500/20 hover:bg-brand-600 transition-all cursor-pointer">
-          Nova NF-e
+        <button
+          onClick={() => { void kpis.refetch(); void cash.refetch() }}
+          className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 border border-slate-800 rounded-lg px-3 py-1.5 shrink-0 cursor-pointer"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          Atualizar
         </button>
       </div>
 
-      <div className="glass-panel p-10 rounded-xl border border-slate-800 text-center">
-        <FileSpreadsheet className="h-12 w-12 mx-auto text-slate-600 mb-4" />
-        <h3 className="text-lg font-semibold text-white">Repositório Fiscal Integrado</h3>
-        <p className="text-slate-400 text-sm mt-1 max-w-md mx-auto">
-          Pronto para se comunicar com as SEFAZs estaduais e prefeituras municipais via motor fiscal dedicado.
-        </p>
+      {error && (
+        <div className="p-4 bg-red-950/50 border border-red-800 text-red-300 text-sm rounded-lg flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>Falha ao carregar indicadores: {error.message}</span>
+        </div>
+      )}
+
+      {/* KPI cards — dados reais */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard title="Faturamento Bruto" icon={DollarSign} loading={loading} value={kpis.data ? brl(kpis.data.result.gross_revenue) : '—'} />
+        <KpiCard title="Resultado Líquido" icon={TrendingUp} loading={loading} value={kpis.data ? brl(kpis.data.result.net_result) : '—'} />
+        <KpiCard title="Margem Líquida" icon={TrendingUp} loading={loading} value={kpis.data ? pct(kpis.data.result.net_margin) : '—'} />
+        <KpiCard title="A Receber em Aberto" icon={FileSpreadsheet} loading={loading} value={kpis.data ? brl(kpis.data.working_capital.accounts_receivable_open) : '—'} />
+      </div>
+
+      {/* Fluxo de caixa + posição patrimonial */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="glass-panel p-5 rounded-xl border border-slate-800 lg:col-span-2">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-semibold text-white flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-brand-400" /> Fluxo de Caixa (método direto)
+            </h3>
+            <span className="text-[10px] text-slate-500 font-mono select-none">/reporting/cash-flow</span>
+          </div>
+          {loading ? (
+            <div className="h-20 bg-slate-800/40 rounded animate-pulse" />
+          ) : cash.data ? (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-slate-400">Recebimentos</p>
+                  <p className="text-lg font-bold text-emerald-400">{brl(cash.data.operating.receipts_from_customers)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Pagamentos</p>
+                  <p className="text-lg font-bold text-rose-400">{brl(cash.data.operating.payments_to_suppliers)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Caixa Líquido</p>
+                  <p className="text-lg font-bold text-white">{brl(cash.data.net_cash_flow)}</p>
+                </div>
+              </div>
+              {emptyCash && (
+                <p className="mt-4 text-xs text-slate-500">
+                  Sem movimentações de caixa no período. Conforme você registrar recebimentos e pagamentos, o fluxo aparece aqui automaticamente.
+                </p>
+              )}
+            </>
+          ) : null}
+        </div>
+
+        <div className="glass-panel p-5 rounded-xl border border-slate-800">
+          <h3 className="font-semibold text-white mb-4">Posição Patrimonial</h3>
+          {loading ? (
+            <div className="space-y-3">{[0, 1, 2, 3].map((i) => <div key={i} className="h-5 bg-slate-800/50 rounded animate-pulse" />)}</div>
+          ) : kpis.data ? (
+            <div className="space-y-3 text-sm">
+              <PositionRow label="Ativos" value={brl(kpis.data.position.total_assets)} />
+              <PositionRow label="Passivos" value={brl(kpis.data.position.total_liabilities)} />
+              <PositionRow label="Patrimônio Líquido" value={brl(kpis.data.position.total_equity)} />
+              <PositionRow label="Endividamento" value={pct(kpis.data.position.debt_ratio)} />
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
 }
 
-// Clients view skeleton
+const TAX_LABELS: Record<string, string> = {
+  icms: 'ICMS',
+  ipi: 'IPI',
+  iss: 'ISS',
+  pis: 'PIS',
+  cofins: 'COFINS',
+  cbs: 'CBS (RTC)',
+  ibs: 'IBS (RTC)',
+  total_taxes: 'Total de Tributos',
+}
+
+// Notas Fiscais — calculadora de tributos REAL (POST /api/v1/fiscal/calculate).
+function InvoicesView() {
+  const [amount, setAmount] = useState('1000.00')
+  const [issueDate, setIssueDate] = useState(todayISO())
+  const [isService, setIsService] = useState(false)
+  const [regime, setRegime] = useState<FiscalRegime>('lucro_presumido')
+
+  const calc = useMutation({
+    mutationFn: () =>
+      fiscalApi.calculate({
+        amount: parseFloat(amount.replace(',', '.')) || 0,
+        issue_date: issueDate,
+        is_service: isService,
+        regime,
+      }),
+  })
+
+  const result: FiscalCalcResponse | undefined = calc.data
+  const entries = result
+    ? Object.entries(result).sort(([a], [b]) =>
+        a === 'total_taxes' ? 1 : b === 'total_taxes' ? -1 : 0,
+      )
+    : []
+  const calcError = calc.error as ApiError | null
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const value = parseFloat(amount.replace(',', '.'))
+    if (!value || value <= 0) return
+    calc.mutate()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-white">Notas Fiscais & Tributação</h2>
+        <p className="text-slate-400 text-sm">
+          Determinação tributária real, versionada por vigência (inclui CBS/IBS da Reforma Tributária a partir de 2026).
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Formulário */}
+        <form onSubmit={handleSubmit} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+          <h3 className="font-semibold text-white flex items-center gap-2">
+            <Calculator className="h-4 w-4 text-brand-400" /> Calculadora Fiscal
+          </h3>
+
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">Valor da operação (R$)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">Data de emissão</label>
+            <input
+              type="date"
+              value={issueDate}
+              onChange={(e) => setIssueDate(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">Tipo de operação</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setIsService(false)} className={`py-2 rounded-lg text-sm border transition-colors cursor-pointer ${!isService ? 'bg-brand-500/15 border-brand-500 text-brand-300' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}>Mercadoria</button>
+              <button type="button" onClick={() => setIsService(true)} className={`py-2 rounded-lg text-sm border transition-colors cursor-pointer ${isService ? 'bg-brand-500/15 border-brand-500 text-brand-300' : 'border-slate-800 text-slate-400 hover:text-slate-200'}`}>Serviço</button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium uppercase tracking-wider text-slate-400 mb-1">Regime tributário</label>
+            <select
+              value={regime}
+              onChange={(e) => setRegime(e.target.value as FiscalRegime)}
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="simples_nacional">Simples Nacional</option>
+              <option value="lucro_presumido">Lucro Presumido</option>
+              <option value="lucro_real">Lucro Real</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={calc.isPending}
+            className="glow-btn w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-2.5 rounded-lg text-sm shadow-lg shadow-brand-500/20 transition-all flex justify-center items-center gap-2 cursor-pointer"
+          >
+            {calc.isPending ? <><Loader2 className="animate-spin h-4 w-4" /> Calculando...</> : 'Calcular tributos'}
+          </button>
+        </form>
+
+        {/* Resultado */}
+        <div className="glass-panel p-6 rounded-xl border border-slate-800">
+          <h3 className="font-semibold text-white mb-4">Tributos determinados</h3>
+
+          {calcError && (
+            <div className="p-3 bg-red-950/50 border border-red-800 text-red-300 text-sm rounded-lg flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>{calcError.message}</span>
+            </div>
+          )}
+
+          {!result && !calcError && (
+            <div className="text-center py-10">
+              <FileSpreadsheet className="h-10 w-10 mx-auto text-slate-600 mb-3" />
+              <p className="text-slate-400 text-sm">Preencha os dados e clique em “Calcular tributos”.</p>
+            </div>
+          )}
+
+          {result && (
+            <div className="divide-y divide-slate-900">
+              {entries.map(([tax, value]) => {
+                const isTotal = tax === 'total_taxes'
+                return (
+                  <div key={tax} className={`flex justify-between py-2.5 ${isTotal ? 'mt-1 border-t-2 border-slate-800' : ''}`}>
+                    <span className={isTotal ? 'font-semibold text-white' : 'text-slate-300'}>
+                      {TAX_LABELS[tax] ?? tax.toUpperCase()}
+                    </span>
+                    <span className={`font-mono ${isTotal ? 'font-bold text-brand-300' : 'text-slate-200'}`}>
+                      {brl(parseFloat(value))}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        Nota: a <span className="text-slate-400">emissão</span> de DF-e (transmissão à SEFAZ) exige um provedor configurado no backend; sem ele, a emissão é recusada com erro claro. O cálculo acima é determinístico e não depende de provedor.
+      </p>
+    </div>
+  )
+}
+
+// Clients view — estado honesto: backend ainda não expõe listagem/cadastro.
 function ClientsView() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white">Clientes Cadastrados</h2>
+        <h2 className="text-2xl font-bold text-white">Clientes</h2>
         <p className="text-slate-400 text-sm">Controle de clientes corporativos e individuais (CRM / ERP).</p>
       </div>
 
       <div className="glass-panel p-10 rounded-xl border border-slate-800 text-center">
         <Users className="h-12 w-12 mx-auto text-slate-600 mb-4" />
-        <h3 className="text-lg font-semibold text-white">Gestão Unificada de Cadastros</h3>
+        <h3 className="text-lg font-semibold text-white">Listagem de clientes em construção</h3>
         <p className="text-slate-400 text-sm mt-1 max-w-md mx-auto">
-          Gerencie contatos, endereços fiscais, inscrições estaduais e regimes tributários.
+          O backend ainda não expõe um endpoint de listagem/cadastro de clientes — hoje o cliente é informado dentro de pedidos de venda. O próximo passo é adicionar
+          <span className="font-mono text-slate-300"> GET /api/v1/customers</span> e ligar esta tela a ele.
         </p>
       </div>
     </div>
   )
 }
 
-// Settings view skeleton
+// Settings view
 function SettingsView() {
   const tenant = useAuthStore((state) => state.tenant)
   const user = useAuthStore((state) => state.user)
+  const permissions = useAuthStore((state) => state.permissions)
 
   return (
     <div className="space-y-6">
@@ -418,7 +533,7 @@ function SettingsView() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
           <h3 className="font-semibold text-white border-b border-slate-900 pb-2">Informações da Organização (Tenant)</h3>
-          
+
           <div className="space-y-3 text-xs">
             <div className="flex justify-between">
               <span className="text-slate-400 font-sans">Nome Fantasia:</span>
@@ -439,23 +554,27 @@ function SettingsView() {
 
         <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
           <h3 className="font-semibold text-white border-b border-slate-900 pb-2">Perfil do Usuário Autenticado</h3>
-          
+
           <div className="space-y-3 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-400 font-sans">Nome:</span>
-              <span className="text-white font-medium">{user?.name}</span>
-            </div>
             <div className="flex justify-between">
               <span className="text-slate-400 font-sans">E-mail:</span>
               <span className="text-white font-mono">{user?.email}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400 font-sans">Permissão:</span>
-              <span className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 font-semibold border border-slate-800 uppercase text-[9px] select-none">
-                {user?.role}
-              </span>
+              <span className="text-slate-400 font-sans">Permissões ativas:</span>
+              <span className="text-white font-medium">{permissions.length}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="glass-panel p-6 rounded-xl border border-slate-800">
+        <h3 className="font-semibold text-white border-b border-slate-900 pb-2 mb-3">Permissões concedidas (do token)</h3>
+        <div className="flex flex-wrap gap-2">
+          {permissions.length === 0 && <span className="text-slate-500 text-xs">Nenhuma permissão carregada.</span>}
+          {permissions.map((p) => (
+            <span key={p} className="px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800 font-mono text-[10px]">{p}</span>
+          ))}
         </div>
       </div>
     </div>
