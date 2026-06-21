@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 export interface User {
   id: string;
@@ -19,40 +20,71 @@ interface AuthState {
   user: User | null;
   tenant: Tenant | null;
   token: string | null;
+  refreshToken: string | null;
+  permissions: string[];
   isLoading: boolean;
   error: string | null;
-  login: (token: string, user: User, tenant: Tenant) => void;
+  login: (
+    tokens: { token: string; refreshToken: string },
+    user: User,
+    tenant: Tenant,
+    permissions: string[],
+  ) => void;
   logout: () => void;
   setTenant: (tenant: Tenant) => void;
   setError: (error: string | null) => void;
   setLoading: (isLoading: boolean) => void;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  isAuthenticated: false,
-  user: null,
-  tenant: null,
-  token: null,
-  isLoading: false,
-  error: null,
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      isAuthenticated: false,
+      user: null,
+      tenant: null,
+      token: null,
+      refreshToken: null,
+      permissions: [],
+      isLoading: false,
+      error: null,
 
-  login: (token, user, tenant) => set({
-    isAuthenticated: true,
-    token,
-    user,
-    tenant,
-    error: null
-  }),
+      login: (tokens, user, tenant, permissions) =>
+        set({
+          isAuthenticated: true,
+          token: tokens.token,
+          refreshToken: tokens.refreshToken,
+          user,
+          tenant,
+          permissions,
+          error: null,
+        }),
 
-  logout: () => set({
-    isAuthenticated: false,
-    token: null,
-    user: null,
-    tenant: null,
-    error: null
-  }),
+      logout: () =>
+        set({
+          isAuthenticated: false,
+          token: null,
+          refreshToken: null,
+          user: null,
+          tenant: null,
+          permissions: [],
+          error: null,
+        }),
 
-  setTenant: (tenant) => set({ tenant }),
-  setError: (error) => set({ error }),
-  setLoading: (isLoading) => set({ isLoading }),
-}))
+      setTenant: (tenant) => set({ tenant }),
+      setError: (error) => set({ error }),
+      setLoading: (isLoading) => set({ isLoading }),
+    }),
+    {
+      name: 'erp-v-auth',
+      // Não persistir estado efêmero de UI.
+      partialize: (state) => ({
+        isAuthenticated: state.isAuthenticated,
+        user: state.user,
+        tenant: state.tenant,
+        token: state.token,
+        refreshToken: state.refreshToken,
+        permissions: state.permissions,
+      }),
+    },
+  ),
+)

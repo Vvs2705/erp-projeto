@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
+import { authApi, ApiError } from './lib/api'
 import {
   LayoutDashboard,
   FileSpreadsheet,
@@ -37,7 +38,7 @@ function Login() {
   const login = useAuthStore((state) => state.login)
   const navigate = useNavigate()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!subdomain) {
       setErrorMsg('Por favor, informe o subdomínio da sua empresa.')
@@ -51,26 +52,45 @@ function Login() {
     setLoading(true)
     setErrorMsg('')
 
-    // Simulate authentication lag
-    setTimeout(() => {
+    // O subdomínio digitado corresponde ao slug do tenant no backend.
+    const slug = subdomain.split('.')[0].trim().toLowerCase()
+
+    try {
+      const tokens = await authApi.login(email, password, slug)
+      const me = await authApi.me(tokens.access_token)
+
       login(
-        'mock-jwt-token-xyz',
+        { token: tokens.access_token, refreshToken: tokens.refresh_token },
         {
-          id: 'user-1',
-          name: 'Vinicius Souza',
-          email: email,
+          id: me.user_id,
+          name: email.split('@')[0],
+          email,
           role: 'admin',
         },
         {
-          id: 'tenant-101',
-          name: subdomain.split('.')[0].toUpperCase() + ' CORP',
-          subdomain: subdomain.includes('.') ? subdomain : `${subdomain}.erp-v.com`,
+          id: me.tenant_id,
+          name: slug.toUpperCase() + ' CORP',
+          subdomain: subdomain.includes('.') ? subdomain : `${slug}.erp-v.com`,
           plan: 'enterprise',
-        }
+        },
+        me.permissions,
       )
-      setLoading(false)
       navigate('/')
-    }, 800)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setErrorMsg(
+          err.status === 401
+            ? 'Credenciais inválidas. Verifique e-mail, senha e subdomínio.'
+            : err.status === 423
+              ? 'Conta temporariamente bloqueada por excesso de tentativas. Tente mais tarde.'
+              : err.message,
+        )
+      } else {
+        setErrorMsg('Falha inesperada ao entrar. Tente novamente.')
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -448,10 +468,15 @@ function DashboardLayout() {
   const tenant = useAuthStore((state) => state.tenant)
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
+  const refreshToken = useAuthStore((state) => state.refreshToken)
   const navigate = useNavigate()
   const location = useLocation()
 
   const handleLogout = () => {
+    // Revoga o refresh token no servidor (best-effort) antes de limpar a sessão.
+    if (refreshToken) {
+      authApi.logout(refreshToken).catch(() => undefined)
+    }
     logout()
     navigate('/login')
   }

@@ -1,0 +1,37 @@
+# Contexto de build do Fly = raiz do monorepo. Mantenha o contexto enxuto;
+# nunca exclua backend/, fiscal-engine/ ou integrations/ (o Dockerfile os copia).
+.git
+.github
+.claude
+.vscode
+.idea
+
+# Frontend não entra na imagem do backend.
+frontend
+node_modules
+
+# Artefatos Python / caches
+**/__pycache__
+**/*.py[cod]
+**/.venv
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+*.egg-info
+
+# Segredos e ambiente — jamais na imagem
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Diversos
+*.log
+tmp
+*.tmp

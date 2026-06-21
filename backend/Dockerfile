@@ -56,6 +56,11 @@ RUN apt-get update \
 # copy in our built venv from builder
 COPY --from=builder $PYSETUP_PATH $PYSETUP_PATH
 
+# O fiscal-engine é instalado em modo editable (develop=true), apontando para
+# /opt/fiscal-engine. A venv copiada acima só guarda o link; o código-fonte
+# precisa existir na imagem de produção, senão `import fiscal_engine` falha.
+COPY --from=builder /opt/fiscal-engine /opt/fiscal-engine
+
 # create a non-privileged user and set permissions
 RUN addgroup --system app && adduser --system --group app
 WORKDIR /app
